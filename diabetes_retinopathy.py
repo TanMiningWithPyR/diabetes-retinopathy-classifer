@@ -43,7 +43,7 @@ NUM_CLASSES = diabetes_retinopathy_input.NUM_CLASSES
 MOVING_AVERAGE_DECAY = 0.9999     # The decay to use for the moving average.
 NUM_EPOCHS_PER_DECAY = 10.0      # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1  # Learning rate decay factor.
-INITIAL_LEARNING_RATE = 0.0001    # Initial learning rate.
+INITIAL_LEARNING_RATE = 0.01    # Initial learning rate.
 
 # If a model is trained with multiple GPUs, prefix all Op names with tower_name
 # to differentiate the operations. Note that this prefix is removed from the
@@ -66,8 +66,7 @@ def _activation_summary(x):
   # session. This helps the clarity of presentation on tensorboard.
   tensor_name = re.sub('%s_[0-9]*/' % TOWER_NAME, '', x.op.name)
   tf.summary.histogram(tensor_name + '/activations', x)
-  tf.summary.scalar(tensor_name + '/sparsity',
-                                       tf.nn.zero_fraction(x))
+  tf.summary.scalar(tensor_name + '/sparsity', tf.nn.zero_fraction(x))
 
 
 def _variable_on_cpu(name, shape, initializer, use_fp16):
@@ -115,7 +114,7 @@ def _variable_with_weight_decay(name, shape, stddev, wd, use_fp16):
   return var
 
 
-def distorted_inputs(data_dir, labels_file, num_epochs, batch_size, use_fp16):
+def distorted_inputs(flags):
   """Construct distorted input for diabetes_retinopathy training using the Reader ops.
 
   Returns:
@@ -125,26 +124,29 @@ def distorted_inputs(data_dir, labels_file, num_epochs, batch_size, use_fp16):
   Raises:
     ValueError: If no data_dir, If no labels_file
   """
-  if not data_dir:
+  if not flags.data_dir:
     raise ValueError('Please supply a data_dir')
-  train_dir = os.path.join(data_dir,'train')
+  train_dir = os.path.join(flags.data_dir,'train')
   if not os.path.exists(train_dir):
     raise ValueError('Please supply train folder in data_dir')
-  if not labels_file:
+  if not flags.labels_file:
     raise ValueError('Please supply a labels_file')  
-  left_images,left_labels,right_images,right_labels,patients = \
-  diabetes_retinopathy_input.distorted_inputs(data_dir=train_dir, labels_file=labels_file,
-                                              num_epochs=num_epochs, batch_size=batch_size)
-  if use_fp16:
+  left_images,left_labels,right_images,right_labels,patients,left_indication,right_indication = \
+  diabetes_retinopathy_input.distorted_inputs(data_dir=train_dir, labels_file=flags.labels_file,
+                                              batch_size=flags.batch_size, repeat=flags.num_epochs)
+
+  if flags.use_fp16:
     left_images = tf.cast(left_images, tf.float16)
     left_labels = tf.cast(left_labels, tf.float16)
     right_images = tf.cast(right_images, tf.float16)
     right_labels = tf.cast(right_labels, tf.float16)
     patients = tf.cast(patients, tf.float16)
-  return left_images,left_labels,right_images,right_labels,patients
+    left_indication = tf.cast(left_indication, tf.float16)
+    right_indication = tf.cast(right_indication, tf.float16)
+  return left_images,left_labels,right_images,right_labels,patients,left_indication,right_indication
 
 
-def inputs(eval_data, data_dir, labels_file, batch_size, use_fp16):
+def inputs(flags):
   """Construct input for diabetes_retinopathy evaluation using the Reader ops.
 
   Returns:
@@ -154,26 +156,29 @@ def inputs(eval_data, data_dir, labels_file, batch_size, use_fp16):
   Raises:
     ValueError: If no data_dir, If no labels_file
   """
-  if not data_dir:
+  if not flags.data_dir:
     raise ValueError('Please supply a data_dir')
-  eval_dir = os.path.join(data_dir,eval_data)
+  eval_dir = os.path.join(flags.data_dir,flags.eval_data)
   if not os.path.exists(eval_dir):
     raise ValueError('Please supply evaluation folder in data_dir')
-  if not labels_file:
+  if not flags.labels_file:
     raise ValueError('Please supply a labels_file') 
-  left_images,left_labels,right_images,right_labels,patients = \
-  diabetes_retinopathy_input.inputs(data_dir=eval_dir, labels_file=labels_file, batch_size=batch_size)
-  if use_fp16:
+  left_images,left_labels,right_images,right_labels,patients,left_indication,right_indication = \
+  diabetes_retinopathy_input.inputs(data_dir=eval_dir, labels_file=flags.labels_file, batch_size=flags.batch_size)
+
+  if flags.use_fp16:
     left_images = tf.cast(left_images, tf.float16)
     left_labels = tf.cast(left_labels, tf.float16)
     right_images = tf.cast(right_images, tf.float16)
     right_labels = tf.cast(right_labels, tf.float16)
     patients = tf.cast(patients, tf.float16)
-  return left_images,left_labels,right_images,right_labels,patients
+    left_indication = tf.cast(left_indication, tf.float16)
+    right_indication = tf.cast(right_indication, tf.float16)
+  return left_images,left_labels,right_images,right_labels,patients,left_indication,right_indication
 
  
 
-def inference(left_images, right_images, batch_size, use_fp16):
+def inference(left_images, right_images, left_indication, right_indication, flags):
   """Build the diabetes retinopathy model.
 
   Args:
@@ -187,441 +192,299 @@ def inference(left_images, right_images, batch_size, use_fp16):
   # If we only ran this model on a single GPU, we could simplify this function
   # by replacing all instances of tf.get_variable() with tf.Variable().
   
-  # Left eyes layers
-  # conv1L
-  with tf.variable_scope('conv1L') as scope:
+  # conv1
+  with tf.variable_scope('conv1') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[7, 7, 3, 32],
                                          stddev=5e-2,
                                          wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(input=left_images, filter=kernel, strides=[1, 2, 2, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [32], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv1L = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv1L)
-
-  # pool1L
-  pool1L = tf.nn.max_pool(conv1L, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
+                                         use_fp16=flags.use_fp16)
+    conv_L = tf.nn.conv2d(input=left_images, filter=kernel, strides=[1, 2, 2, 1], padding='SAME')
+    conv_R = tf.nn.conv2d(input=right_images, filter=kernel, strides=[1, 2, 2, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [32], tf.constant_initializer(0.0), flags.use_fp16)
+    pre_activation_L = tf.nn.bias_add(conv_L, biases)
+    pre_activation_R = tf.nn.bias_add(conv_R, biases)
+    conv_1L = tf.nn.leaky_relu(pre_activation_L, alpha=0.5 ,name=scope.name)
+    conv_1R = tf.nn.leaky_relu(pre_activation_R, alpha=0.5 ,name=scope.name)
+    _activation_summary(conv_1L)
+    _activation_summary(conv_1R)
+    
+  # pool1
+  pool_1L = tf.nn.max_pool(conv_1L, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
                          padding='SAME', name='pool1L')
-
-  # conv2L
-  with tf.variable_scope('conv2L') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 32, 32],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(pool1L, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [32], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv2L = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv2L)
-
-  # conv3L
-  with tf.variable_scope('conv3L') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 32, 32],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(conv2L, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [32], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv3L = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv3L)   
-    
-  # pool2L
-  pool2L = tf.nn.max_pool(conv3L, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
-                         padding='SAME', name='pool2L')
-  
-  # conv4L
-  with tf.variable_scope('conv4L') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 32, 64],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(pool2L, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv4L = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv4L)
-
-  # conv5L
-  with tf.variable_scope('conv5L') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 64, 64],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(conv4L, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv5L = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv5L)   
-    
-  # pool3L
-  pool3L = tf.nn.max_pool(conv5L, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
-                         padding='SAME', name='pool3L')  
-
-  # conv6L
-  with tf.variable_scope('conv6L') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 64, 128],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(pool3L, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [128], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv6L = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv6L)
-
-  # conv7L
-  with tf.variable_scope('conv7L') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 128, 128],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(conv6L, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [128], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv7L = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv7L)   
-
-  # conv8L
-  with tf.variable_scope('conv8L') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 128, 128],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(conv7L, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [128], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv8L = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv8L)   
-
-  # conv9L
-  with tf.variable_scope('conv9L') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 128, 128],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(conv8L, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [128], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv9L = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv9L)    
-    
-  # pool4L
-  pool4L = tf.nn.max_pool(conv9L, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
-                         padding='SAME', name='pool4L')   
-
-  # conv10L
-  with tf.variable_scope('conv10L') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 128, 256],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(pool4L, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [256], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv10L = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv10L)
-
-  # conv11L
-  with tf.variable_scope('conv11L') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 256, 256],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(conv10L, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [256], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv11L = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv11L)   
-
-  # conv12L
-  with tf.variable_scope('conv12L') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 256, 256],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(conv11L, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [256], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv12L = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv12L)   
-
-  # conv13L
-  with tf.variable_scope('conv13L') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 256, 256],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(conv12L, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [256], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv13L = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv13L)    
-    
-  # pool5L
-  pool5L = tf.nn.max_pool(conv13L, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
-                         padding='SAME', name='pool5L') 
-  
-  # dropout1L
-  dropout1L = tf.nn.dropout(pool5L, keep_prob=0.25, name='dropout1L')  
- 
-  # maxout1L
-  with tf.variable_scope('maxout1L') as scope:
-    reshape = tf.reshape(dropout1L, [-1, 16384])
-    weights = _variable_with_weight_decay('weights', shape=[16384, 512, 2],
-                                          stddev=0.04, wd=0.004, use_fp16=use_fp16)    
-    biases = _variable_on_cpu('biases', [512, 2], tf.constant_initializer(0.1), use_fp16)
-    maxout1L = tf.tensordot(reshape, weights, axes=1) + biases
-    maxout1L = tf.reduce_max(maxout1L, axis=2, name='maxout1L')
-    _activation_summary(maxout1L)
-  
-  # concat1L
-  with tf.variable_scope('concat1L') as scope:
-    concat1L = tf.concat([maxout1L,tf.constant(batch_size * [[1.0,0.0]])], axis=-1)
-
-
-  # Right eyes layers
-  # conv1R
-  with tf.variable_scope('conv1R') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[7, 7, 3, 32],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(input=right_images, filter=kernel, strides=[1, 2, 2, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [32], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv1R = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv1R)
-
-  # pool1R
-  pool1R = tf.nn.max_pool(conv1R, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
+  pool_1R = tf.nn.max_pool(conv_1R, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
                          padding='SAME', name='pool1R')
-
-  # conv2R
-  with tf.variable_scope('conv2R') as scope:
+  
+  # conv2
+  with tf.variable_scope('conv2') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 32, 32],
                                          stddev=5e-2,
                                          wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(pool1R, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [32], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv2R = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv2R)
-
-  # conv3R
-  with tf.variable_scope('conv3R') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 32, 32],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(conv2R, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [32], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv3R = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv3R)   
+                                         use_fp16=flags.use_fp16)
+    conv_L = tf.nn.conv2d(pool_1L, kernel, [1, 1, 1, 1], padding='SAME')
+    conv_R = tf.nn.conv2d(pool_1R, kernel, [1, 1, 1, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [32], tf.constant_initializer(0.1), flags.use_fp16)
+    pre_activation_L = tf.nn.bias_add(conv_L, biases)
+    pre_activation_R = tf.nn.bias_add(conv_R, biases)    
+    conv_2L = tf.nn.leaky_relu(pre_activation_L, alpha=0.5 ,name=scope.name)
+    conv_2R = tf.nn.leaky_relu(pre_activation_R, alpha=0.5 ,name=scope.name)
+    _activation_summary(conv_2L)
+    _activation_summary(conv_2R)
     
-  # pool2L
-  pool2R = tf.nn.max_pool(conv3R, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
+  # conv3
+  with tf.variable_scope('conv3') as scope:
+    kernel = _variable_with_weight_decay('weights',
+                                         shape=[3, 3, 32, 32],
+                                         stddev=5e-2,
+                                         wd=0.0,
+                                         use_fp16=flags.use_fp16)
+    conv_L = tf.nn.conv2d(conv_2L, kernel, [1, 1, 1, 1], padding='SAME')
+    conv_R = tf.nn.conv2d(conv_2R, kernel, [1, 1, 1, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [32], tf.constant_initializer(0.1), flags.use_fp16)
+    pre_activation_L = tf.nn.bias_add(conv_L, biases)
+    pre_activation_R = tf.nn.bias_add(conv_R, biases)
+    conv_3L = tf.nn.leaky_relu(pre_activation_L, alpha=0.5 ,name=scope.name)
+    conv_3R = tf.nn.leaky_relu(pre_activation_R, alpha=0.5 ,name=scope.name)
+    _activation_summary(conv_3L)   
+    _activation_summary(conv_3R)   
+    
+  # pool2
+  pool_2L = tf.nn.max_pool(conv_3L, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
+                         padding='SAME', name='pool2L')
+  pool_2R = tf.nn.max_pool(conv_3R, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
                          padding='SAME', name='pool2R')
   
-  # conv4R
-  with tf.variable_scope('conv4R') as scope:
+  # conv4
+  with tf.variable_scope('conv4') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 32, 64],
                                          stddev=5e-2,
                                          wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(pool2R, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv4R = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv4R)
-
-  # conv5R
-  with tf.variable_scope('conv5R') as scope:
+                                         use_fp16=flags.use_fp16)
+    conv_L = tf.nn.conv2d(pool_2L, kernel, [1, 1, 1, 1], padding='SAME')
+    conv_R = tf.nn.conv2d(pool_2R, kernel, [1, 1, 1, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.1), flags.use_fp16)
+    pre_activation_L = tf.nn.bias_add(conv_L, biases)
+    pre_activation_R = tf.nn.bias_add(conv_R, biases)        
+    conv_4L = tf.nn.leaky_relu(pre_activation_L, alpha=0.5 ,name=scope.name)
+    conv_4R = tf.nn.leaky_relu(pre_activation_R, alpha=0.5 ,name=scope.name)    
+    _activation_summary(conv_4L)
+    _activation_summary(conv_4R)
+    
+  # conv5
+  with tf.variable_scope('conv5') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 64, 64],
                                          stddev=5e-2,
                                          wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(conv4R, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv5R = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv5R)   
+                                         use_fp16=flags.use_fp16)
+    conv_L = tf.nn.conv2d(conv_4L, kernel, [1, 1, 1, 1], padding='SAME')
+    conv_R = tf.nn.conv2d(conv_4R, kernel, [1, 1, 1, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.1), flags.use_fp16)
+    pre_activation_L = tf.nn.bias_add(conv_L, biases)
+    pre_activation_R = tf.nn.bias_add(conv_R, biases) 
+    conv_5L = tf.nn.leaky_relu(pre_activation_L, alpha=0.5 ,name=scope.name)
+    conv_5R = tf.nn.leaky_relu(pre_activation_R, alpha=0.5 ,name=scope.name)
+    _activation_summary(conv_5L)   
+    _activation_summary(conv_5R)   
     
-  # pool3R
-  pool3R = tf.nn.max_pool(conv5R, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
-                         padding='SAME', name='pool3R')  
-
-  # conv6R
-  with tf.variable_scope('conv6R') as scope:
+  # pool3
+  pool_3L = tf.nn.max_pool(conv_5L, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
+                         padding='SAME', name='pool3L')  
+  pool_3R = tf.nn.max_pool(conv_5R, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
+                         padding='SAME', name='pool3R') 
+  # conv6
+  with tf.variable_scope('conv6') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 64, 128],
                                          stddev=5e-2,
                                          wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(pool3R, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [128], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv6R = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv6R)
-
-  # conv7R
-  with tf.variable_scope('conv7R') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 128, 128],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(conv6R, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [128], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv7R = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv7R)   
-
-  # conv8R
-  with tf.variable_scope('conv8R') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 128, 128],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(conv7R, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [128], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv8R = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv8R)   
-
-  # conv9R
-  with tf.variable_scope('conv9R') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 128, 128],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(conv8R, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [128], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv9R = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv9R)    
+                                         use_fp16=flags.use_fp16)
+    conv_L = tf.nn.conv2d(pool_3L, kernel, [1, 1, 1, 1], padding='SAME')
+    conv_R = tf.nn.conv2d(pool_3R, kernel, [1, 1, 1, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [128], tf.constant_initializer(0.1), flags.use_fp16)
+    pre_activation_L = tf.nn.bias_add(conv_L, biases)
+    pre_activation_R = tf.nn.bias_add(conv_R, biases) 
+    conv_6L = tf.nn.leaky_relu(pre_activation_L, alpha=0.5 ,name=scope.name)
+    conv_6R = tf.nn.leaky_relu(pre_activation_R, alpha=0.5 ,name=scope.name)    
+    _activation_summary(conv_6L)
+    _activation_summary(conv_6R)
     
-  # pool4R
-  pool4R = tf.nn.max_pool(conv9R, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
-                         padding='SAME', name='pool4R')   
+  # conv7
+  with tf.variable_scope('conv7') as scope:
+    kernel = _variable_with_weight_decay('weights',
+                                         shape=[3, 3, 128, 128],
+                                         stddev=5e-2,
+                                         wd=0.0,
+                                         use_fp16=flags.use_fp16)
+    conv_L = tf.nn.conv2d(conv_6L, kernel, [1, 1, 1, 1], padding='SAME')
+    conv_R = tf.nn.conv2d(conv_6R, kernel, [1, 1, 1, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [128], tf.constant_initializer(0.1), flags.use_fp16)
+    pre_activation_L = tf.nn.bias_add(conv_L, biases)
+    pre_activation_R = tf.nn.bias_add(conv_R, biases) 
+    conv_7L = tf.nn.leaky_relu(pre_activation_L, alpha=0.5 ,name=scope.name)
+    conv_7R = tf.nn.leaky_relu(pre_activation_R, alpha=0.5 ,name=scope.name)
+    _activation_summary(conv_7L)   
+    _activation_summary(conv_7R)     
 
-  # conv10R
-  with tf.variable_scope('conv10R') as scope:
+  # conv8
+  with tf.variable_scope('conv8') as scope:
+    kernel = _variable_with_weight_decay('weights',
+                                         shape=[3, 3, 128, 128],
+                                         stddev=5e-2,
+                                         wd=0.0,
+                                         use_fp16=flags.use_fp16)
+    conv_L = tf.nn.conv2d(conv_7L, kernel, [1, 1, 1, 1], padding='SAME')
+    conv_R = tf.nn.conv2d(conv_7R, kernel, [1, 1, 1, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [128], tf.constant_initializer(0.1), flags.use_fp16)
+    pre_activation_L = tf.nn.bias_add(conv_L, biases)
+    pre_activation_R = tf.nn.bias_add(conv_R, biases) 
+    conv_8L = tf.nn.leaky_relu(pre_activation_L, alpha=0.5 ,name=scope.name)
+    conv_8R = tf.nn.leaky_relu(pre_activation_R, alpha=0.5 ,name=scope.name)
+    _activation_summary(conv_8L)   
+    _activation_summary(conv_8R)   
+    
+  # conv9
+  with tf.variable_scope('conv9') as scope:
+    kernel = _variable_with_weight_decay('weights',
+                                         shape=[3, 3, 128, 128],
+                                         stddev=5e-2,
+                                         wd=0.0,
+                                         use_fp16=flags.use_fp16)
+    conv_L = tf.nn.conv2d(conv_8L, kernel, [1, 1, 1, 1], padding='SAME')
+    conv_R = tf.nn.conv2d(conv_8R, kernel, [1, 1, 1, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [128], tf.constant_initializer(0.1), flags.use_fp16)
+    pre_activation_L = tf.nn.bias_add(conv_L, biases)
+    pre_activation_R = tf.nn.bias_add(conv_R, biases) 
+    conv_9L = tf.nn.leaky_relu(pre_activation_L, alpha=0.5 ,name=scope.name)
+    conv_9R = tf.nn.leaky_relu(pre_activation_R, alpha=0.5 ,name=scope.name)
+    _activation_summary(conv_9L)    
+    _activation_summary(conv_9R)      
+    
+  # pool4
+  pool_4L = tf.nn.max_pool(conv_9L, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
+                         padding='SAME', name='pool4L')   
+  pool_4R = tf.nn.max_pool(conv_9R, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
+                         padding='SAME', name='pool4R') 
+  
+  # conv10
+  with tf.variable_scope('conv10') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 128, 256],
                                          stddev=5e-2,
                                          wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(pool4R, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [256], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv10R = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv10R)
-
-  # conv11R
-  with tf.variable_scope('conv11R') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 256, 256],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(conv10R, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [256], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv11R = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv11R)   
-
-  # conv12R
-  with tf.variable_scope('conv12R') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 256, 256],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(conv11R, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [256], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv12R = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv12R)   
-
-  # conv13R
-  with tf.variable_scope('conv13R') as scope:
-    kernel = _variable_with_weight_decay('weights',
-                                         shape=[3, 3, 256, 256],
-                                         stddev=5e-2,
-                                         wd=0.0,
-                                         use_fp16=use_fp16)
-    conv = tf.nn.conv2d(conv12R, kernel, [1, 1, 1, 1], padding='SAME')
-    biases = _variable_on_cpu('biases', [256], tf.constant_initializer(0.1), use_fp16)
-    pre_activation = tf.nn.bias_add(conv, biases)
-    conv13R = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(conv13R)    
+                                         use_fp16=flags.use_fp16)
+    conv_L = tf.nn.conv2d(pool_4L, kernel, [1, 1, 1, 1], padding='SAME')
+    conv_R = tf.nn.conv2d(pool_4R, kernel, [1, 1, 1, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [256], tf.constant_initializer(0.1), flags.use_fp16)
+    pre_activation_L = tf.nn.bias_add(conv_L, biases)
+    pre_activation_R = tf.nn.bias_add(conv_R, biases) 
+    conv_10L = tf.nn.leaky_relu(pre_activation_L, alpha=0.5 ,name=scope.name)
+    conv_10R = tf.nn.leaky_relu(pre_activation_R, alpha=0.5 ,name=scope.name)
+    _activation_summary(conv_10L)
+    _activation_summary(conv_10R)
     
-  # pool5R
-  pool5R = tf.nn.max_pool(conv13R, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
-                         padding='SAME', name='pool5R') 
+  # conv11
+  with tf.variable_scope('conv11') as scope:
+    kernel = _variable_with_weight_decay('weights',
+                                         shape=[3, 3, 256, 256],
+                                         stddev=5e-2,
+                                         wd=0.0,
+                                         use_fp16=flags.use_fp16)
+    conv_L = tf.nn.conv2d(conv_10L, kernel, [1, 1, 1, 1], padding='SAME')
+    conv_R = tf.nn.conv2d(conv_10R, kernel, [1, 1, 1, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [256], tf.constant_initializer(0.1), flags.use_fp16)
+    pre_activation_L = tf.nn.bias_add(conv_L, biases)
+    pre_activation_R = tf.nn.bias_add(conv_R, biases) 
+    conv_11L = tf.nn.leaky_relu(pre_activation_L, alpha=0.5 ,name=scope.name)
+    conv_11R = tf.nn.leaky_relu(pre_activation_R, alpha=0.5 ,name=scope.name)
+    _activation_summary(conv_11L)   
+    _activation_summary(conv_11R) 
+    
+  # conv12
+  with tf.variable_scope('conv12') as scope:
+    kernel = _variable_with_weight_decay('weights',
+                                         shape=[3, 3, 256, 256],
+                                         stddev=5e-2,
+                                         wd=0.0,
+                                         use_fp16=flags.use_fp16)
+    conv_L = tf.nn.conv2d(conv_11L, kernel, [1, 1, 1, 1], padding='SAME')
+    conv_R = tf.nn.conv2d(conv_11R, kernel, [1, 1, 1, 1], padding='SAME')
+    biases = _variable_on_cpu('biases', [256], tf.constant_initializer(0.1), flags.use_fp16)
+    pre_activation_L = tf.nn.bias_add(conv_L, biases)
+    pre_activation_R = tf.nn.bias_add(conv_R, biases) 
+    conv_12L = tf.nn.leaky_relu(pre_activation_L, alpha=0.5 ,name=scope.name)
+    conv_12R = tf.nn.leaky_relu(pre_activation_R, alpha=0.5 ,name=scope.name)
+    _activation_summary(conv_12L)   
+    _activation_summary(conv_12R)
+    
+  # conv13
+  with tf.variable_scope('conv13') as scope:
+    kernel = _variable_with_weight_decay('weights',
+                                         shape=[3, 3, 256, 256],
+                                         stddev=5e-2,
+                                         wd=0.0,
+                                         use_fp16=flags.use_fp16)
+    conv_L = tf.nn.conv2d(conv_12L, kernel, [1, 1, 1, 1], padding='SAME')
+    conv_R = tf.nn.conv2d(conv_12R, kernel, [1, 1, 1, 1], padding='SAME')  
+    biases = _variable_on_cpu('biases', [256], tf.constant_initializer(0.1), flags.use_fp16)
+    pre_activation_L = tf.nn.bias_add(conv_L, biases)
+    pre_activation_R = tf.nn.bias_add(conv_R, biases) 
+    conv_13L = tf.nn.leaky_relu(pre_activation_L, alpha=0.5 ,name=scope.name)
+    conv_13R = tf.nn.leaky_relu(pre_activation_R, alpha=0.5 ,name=scope.name)    
+    _activation_summary(conv_13L)    
+    _activation_summary(conv_13R) 
+    
+  # pool5
+  pool_5L = tf.nn.max_pool(conv_13L, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
+                         padding='SAME', name='pool5L') 
+  pool_5R = tf.nn.max_pool(conv_13R, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
+                         padding='SAME', name='pool5R')   
   
-  # dropout1R
-  dropout1R = tf.nn.dropout(pool5R, keep_prob=0.25, name='dropout1R')  
- 
-  # maxout1R
-  with tf.variable_scope('maxout1R') as scope:
-    reshape = tf.reshape(dropout1R, [-1, 16384])
+  # dropout1
+  dropout_1L = tf.nn.dropout(pool_5L, keep_prob=0.25, name='dropout1L')  
+  dropout_1R = tf.nn.dropout(pool_5R, keep_prob=0.25, name='dropout1L')  
+  
+  # maxout1
+  with tf.variable_scope('maxout1') as scope:
+    reshape_L = tf.reshape(dropout_1L, [-1, 16384])
+    reshape_R = tf.reshape(dropout_1R, [-1, 16384])
     weights = _variable_with_weight_decay('weights', shape=[16384, 512, 2],
-                                          stddev=0.04, wd=0.004, use_fp16=use_fp16)    
-    biases = _variable_on_cpu('biases', [512, 2], tf.constant_initializer(0.1), use_fp16)
-    maxout1R = tf.tensordot(reshape, weights, axes=1) + biases
-    maxout1R = tf.reduce_max(maxout1R, axis=2, name='maxout1R')
-    _activation_summary(maxout1R)
-  
-  # concat1R
-  with tf.variable_scope('concat1R') as scope:
-    concat1R = tf.concat([maxout1R,tf.constant(batch_size * [[0.0,1.0]])], axis=-1)
+                                          stddev=0.04, wd=0.004, use_fp16=flags.use_fp16)    
+    biases = _variable_on_cpu('biases', [512, 2], tf.constant_initializer(0.1), flags.use_fp16)
+    maxout_L = tf.tensordot(reshape_L, weights, axes=1) + biases
+    maxout_1L = tf.reduce_max(maxout_L, axis=2, name=scope.name)
+    maxout_R = tf.tensordot(reshape_R, weights, axes=1) + biases
+    maxout_1R = tf.reduce_max(maxout_R, axis=2, name=scope.name)
+    _activation_summary(maxout_1L)
+    _activation_summary(maxout_1R)
+    
+  # concat1
+  with tf.variable_scope('concat1') as scope:
+    concat_1L = tf.concat([maxout_1L,left_indication], axis=-1)
+    concat_1R = tf.concat([maxout_1R,left_indication], axis=-1) 
       
   # merge two eyes
     
   # reshape1M(merge eyes)
-  reshape1M = tf.concat([concat1L,concat1R], axis=-1)
+  reshape_1M = tf.concat([concat_1L,concat_1R], axis=-1, name="reshape1M")
 
   # dropout2M
-  dropout2M = tf.nn.dropout(reshape1M, keep_prob=0.25, name='dropout2M')    
+  dropout_2M = tf.nn.dropout(reshape_1M, keep_prob=0.25, name='dropout2M')    
   
   # maxout2
   with tf.variable_scope('maxout2') as scope:
-    reshape = tf.reshape(dropout2M, [-1, 1028])
+    reshape = tf.reshape(dropout_2M, [-1, 1028])
     weights = _variable_with_weight_decay('weights', shape=[1028, 512, 2],
-                                          stddev=0.04, wd=0.004, use_fp16=use_fp16)    
-    biases = _variable_on_cpu('biases', [512, 2], tf.constant_initializer(0.1), use_fp16)
-    maxout2 = tf.tensordot(reshape, weights, axes=1) + biases
-    maxout2 = tf.reduce_max(maxout2, axis=2, name='maxout2')
-    _activation_summary(maxout2)  
+                                          stddev=0.04, wd=0.004, use_fp16=flags.use_fp16)    
+    biases = _variable_on_cpu('biases', [512, 2], tf.constant_initializer(0.1), flags.use_fp16)
+    maxout = tf.tensordot(reshape, weights, axes=1) + biases
+    maxout_2M = tf.reduce_max(maxout, axis=2, name='maxout2')
+    _activation_summary(maxout_2M)  
 
   # dropout3M
-  dropout3M = tf.nn.dropout(maxout2, keep_prob=0.25, name='dropout3M')
+  dropout_3M = tf.nn.dropout(maxout_2M, keep_prob=0.25, name='dropout3M')
     
   # linear layer(WX + b),
   # We don't apply softmax here because
@@ -629,15 +492,15 @@ def inference(left_images, right_images, batch_size, use_fp16):
   # and performs the softmax internally for efficiency.
   with tf.variable_scope('softmax_linear') as scope:
     weights = _variable_with_weight_decay('weights', [512, 2*NUM_CLASSES],
-                                          stddev=1/512.0, wd=0.0, use_fp16=use_fp16)
-    biases = _variable_on_cpu('biases', [2*NUM_CLASSES], tf.constant_initializer(0.0), use_fp16)
-    softmax_linear = tf.add(tf.matmul(dropout3M, weights), biases, name=scope.name)
+                                          stddev=1/512.0, wd=0.0, use_fp16=flags.use_fp16)
+    biases = _variable_on_cpu('biases', [2*NUM_CLASSES], tf.constant_initializer(0.0), flags.use_fp16)
+    softmax_linear = tf.add(tf.matmul(dropout_3M, weights), biases, name=scope.name)
     _activation_summary(softmax_linear)
     
   # back to one eye
-  reshape2L, reshape2R = tf.split(softmax_linear,[5,5],-1)
+  reshape_2L, reshape_2R = tf.split(softmax_linear,[5,5],-1)
     
-  return reshape2L, reshape2R  
+  return reshape_2L, reshape_2R  
   
 def loss(left_logits, right_logits, left_labels, right_labels):
   """Add L2Loss to all the trainable variables.
@@ -646,7 +509,7 @@ def loss(left_logits, right_logits, left_labels, right_labels):
   Args:
     logits: Logits from inference().
     labels: Labels from distorted_inputs or inputs(). 1-D tensor
-            of shape [batch_size]
+            of shape [samples_count]
 
   Returns:
     Loss tensor of type float.
@@ -695,7 +558,7 @@ def _add_loss_summaries(total_loss):
   return loss_averages_op
 
 
-def train(total_loss, global_step, batch_size, num_examples_for_train):
+def train(total_loss, global_step, flags):
   """Train diabetes_retinopathy model.
 
   Create an optimizer and apply to all trainable variables. Add moving
@@ -709,7 +572,7 @@ def train(total_loss, global_step, batch_size, num_examples_for_train):
     train_op: op for training.
   """
   # Variables that affect learning rate.
-  num_batches_per_epoch = num_examples_for_train / batch_size
+  num_batches_per_epoch = flags.num_examples_for_train / flags.batch_size
   decay_steps = int(num_batches_per_epoch * NUM_EPOCHS_PER_DECAY)
 
   # Decay the learning rate exponentially based on the number of steps.

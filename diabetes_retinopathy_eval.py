@@ -24,9 +24,6 @@ eval_parser = argparse.ArgumentParser(parents=[diabetes_retinopathy.model_parser
 eval_parser.add_argument('--eval_log_dir', type=str, default='D:\\AlanTan\\CNN\\diabetes_retinopathy_tensorflow\\diabetes_retinopathy_classifer_tensorflow_eval',
                     help='Directory where to write event logs.')
 
-eval_parser.add_argument('--eval_data', type=str, default='test',
-                    help='Either `test` or `train_eval`.')
-
 eval_parser.add_argument('--checkpoint_dir', type=str, default='D:\\AlanTan\\CNN\\diabetes_retinopathy_tensorflow\\diabetes_retinopathy_classifer_tensorflow_train',
                     help='Directory where to read model checkpoints.')
 
@@ -102,13 +99,13 @@ def evaluate():
   with tf.Graph().as_default() as g:
     # Get images and labels for diabetes_retinopathy.
     with tf.device('/cpu:0'):
-      left_images, left_labels, right_images, right_labels, patients = \
-      diabetes_retinopathy.inputs(FLAGS.eval_data, FLAGS.data_dir, FLAGS.labels_file, FLAGS.batch_size, FLAGS.use_fp16)
+      left_images, left_labels, right_images, right_labels, patients,left_indication, right_indication = \
+      diabetes_retinopathy.inputs(FLAGS)
 
     # Build a Graph that computes the logits predictions from the
     # inference model.
     left_logits, right_logits = diabetes_retinopathy.inference(left_images, right_images, 
-                                                               FLAGS.batch_size, FLAGS.use_fp16)
+                                                               left_indication, right_indication, FLAGS)
 
     # Calculate predictions.
     left_top_k_op = tf.nn.in_top_k(left_logits, left_labels, 1)

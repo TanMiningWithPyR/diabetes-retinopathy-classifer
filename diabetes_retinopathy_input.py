@@ -5,8 +5,9 @@ from __future__ import division
 from __future__ import print_function
 
 import os
-
+import random
 import argparse
+
 import pandas as pd
 import tensorflow as tf
 
@@ -30,6 +31,8 @@ input_parser.add_argument('--num_examples_for_eval', type=int, default=5344,
                     help='num examples per epoch for evaluation.')
 input_parser.add_argument('--num_epochs', type=int, default=120,
                     help='num epochs for train.')
+input_parser.add_argument('--eval_data', type=str, default='test',
+                    help='Either `test` or `train_eval`.')
 
 NUM_CLASSES = 5
 
@@ -61,7 +64,12 @@ def _crop_image(tf_image):
     lambda: tf.image.resize_image_with_crop_or_pad(tf_image, 2*tf_r_height, 2*tf_r_height))
   return tf_image_cropped
 
-def transform_image(tf_filename,random_op=True):    
+def _random_rotate(tf_image, max_angle=10):
+  random_angle = random.randint(-max_angle,max_angle) * 3.14 / 180
+  tf_image_rotate = tf.contrib.image.rotate(tf_image,random_angle)
+  return tf_image_rotate
+  
+def _transform_image(tf_filename,random_op=True):    
   tf_image_string = tf.read_file(tf_filename)
   tf_image_decoded = tf.image.decode_image(tf_image_string)
   tf_image_cropped = _crop_image(tf_image_decoded)
@@ -80,58 +88,69 @@ def transform_image(tf_filename,random_op=True):
     tf_distorted_image = tf.image.random_brightness(tf_distorted_image, max_delta=0.2)
     tf_distorted_image = tf.image.random_saturation(tf_distorted_image, lower=0.9, upper=2)
     tf_distorted_image = tf.image.random_hue(tf_distorted_image, max_delta=0.02)
+    # rotate
+    tf_distorted_image = _random_rotate(tf_distorted_image)
   # Subtract off the mean and divide by the variance of the pixels.
   tf_distorted_image = tf.image.per_image_standardization(tf_distorted_image)
   return tf_distorted_image
 
-def _parse_function_distorted(tf_patient_path,tf_label,tf_patient):  
+def _parse_function_distorted(tf_patient_path,tf_label,tf_patient,tf_left_indication,tf_right_indication):  
   tf_patients_left_path = tf.string_join([tf_patient_path,tf.constant('left.jpeg')],separator='\\')
   tf_patients_right_path = tf.string_join([tf_patient_path, tf.constant('right.jpeg')],separator='\\')
-  tf_left_image = transform_image(tf_patients_left_path)
-  tf_right_image = transform_image(tf_patients_right_path)
+  tf_left_image = _transform_image(tf_patients_left_path,random_op=False)
+  tf_right_image = _transform_image(tf_patients_right_path,random_op=False)
   tf_left_label,tf_right_label = tf_label[0],tf_label[1]
-  return tf_left_image, tf_left_label, tf_right_image, tf_right_label , tf_patient
+  return tf_left_image, tf_left_label, tf_right_image, tf_right_label, tf_patient, tf_left_indication, tf_right_indication 
 
-def _parse_function_normal(tf_patient_path,tf_label,tf_patient):  
+def _parse_function_normal(tf_patient_path,tf_label,tf_patient,tf_left_indication,tf_right_indication):  
   tf_patients_left_path = tf.string_join([tf_patient_path,tf.constant('left.jpeg')],separator='\\')
   tf_patients_right_path = tf.string_join([tf_patient_path, tf.constant('right.jpeg')],separator='\\')
-  tf_left_image = transform_image(tf_patients_left_path,random_op=False)
-  tf_right_image = transform_image(tf_patients_right_path,random_op=False)
+  tf_left_image = _transform_image(tf_patients_left_path,random_op=False)
+  tf_right_image = _transform_image(tf_patients_right_path,random_op=False)
   tf_left_label,tf_right_label = tf_label[0],tf_label[1]
-  return tf_left_image, tf_left_label, tf_right_image, tf_right_label , tf_patient
+  return tf_left_image, tf_left_label, tf_right_image, tf_right_label, tf_patient, tf_left_indication, tf_right_indication 
   
-def distorted_inputs(data_dir, labels_file, num_epochs, batch_size=32):
+def distorted_inputs(data_dir, labels_file,  batch_size, repeat=None):
   """Construct distorted input for diabetes retinopathy training using the Reader ops.
 
   Args:
     data_dir: Path to the diabetes retinopathy data directory.
-    labels_file: Path to the label_file(.csv) for each eyes
+    labels_file: Path to the label_file(.csv) for each eyes.
     batch_size: Number of images per batch.
+    repeat: how many times this dataset repeats during training. The default behavior is for the elements to be repeated indefinitely    
 
   Returns:
     images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
     labels: Labels. 1D tensor of [batch_size] size.
   """
   patients = os.listdir(data_dir)
-  patient_paths = [os.path.join(data_dir,patient) for patient in patients]
+  patient_paths = [os.path.join(data_dir, patient) for patient in patients]
 
   df_labels = read_label(labels_file)
   labels = [list(df_labels.ix[patient].values) for patient in patients]
 
+  pair_eyes_count = len(patients)
+  left_indications = pair_eyes_count * [(1.0, 0.0)]
+  right_indications = pair_eyes_count * [(0.0, 1.0)]
+
   tf_patient_paths = tf.constant(patient_paths)
   tf_labels = tf.constant(labels)
   tf_patients = tf.constant(patients)
+  tf_left_indications = tf.constant(left_indications)
+  tf_right_indications = tf.constant(right_indications)
   
-  tf_dataset = tf.data.Dataset.from_tensor_slices((tf_patient_paths,tf_labels,tf_patients))
+  tf_dataset = tf.data.Dataset.from_tensor_slices((tf_patient_paths, tf_labels, tf_patients, tf_left_indications, tf_right_indications))
   tf_dataset = tf_dataset.map(_parse_function_distorted)
-#  tf_dataset = tf_dataset.shuffle(buffer_size=NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN)
+  tf_dataset = tf_dataset.shuffle(buffer_size=pair_eyes_count)
   tf_dataset = tf_dataset.batch(batch_size)
-  tf_dataset = tf_dataset.repeat(num_epochs)
+  tf_dataset = tf_dataset.repeat(repeat)
   tf_iterator = tf_dataset.make_one_shot_iterator()
-  tf_next_left_image,tf_next_left_label,tf_next_right_image,tf_next_right_label,tf_next_patient = tf_iterator.get_next()
-  return tf_next_left_image,tf_next_left_label,tf_next_right_image,tf_next_right_label,tf_next_patient
+  tf_next_left_image,tf_next_left_label, \
+  tf_next_right_image,tf_next_right_label, \
+  tf_next_patient, tf_next_left_indication, tf_next_right_indication = tf_iterator.get_next()  
+  return tf_next_left_image,tf_next_left_label,tf_next_right_image,tf_next_right_label,tf_next_patient,tf_next_left_indication,tf_next_right_indication
 
-def inputs(data_dir, labels_file, batch_size=32):
+def inputs(data_dir, labels_file, batch_size):
   """Construct input for diabetes retinopathy evaluation using the Reader ops.
 
   Args:    
@@ -149,21 +168,36 @@ def inputs(data_dir, labels_file, batch_size=32):
   df_labels = read_label(labels_file)
   labels = [list(df_labels.ix[patient].values) for patient in patients]
 
+  pair_eyes_count = len(patients)
+  left_indications = pair_eyes_count * [(1.0, 0.0)]
+  right_indications = pair_eyes_count * [(0.0, 1.0)]
+
   tf_patient_paths = tf.constant(patient_paths)
   tf_labels = tf.constant(labels)
   tf_patients = tf.constant(patients)
+  tf_left_indications = tf.constant(left_indications)
+  tf_right_indications = tf.constant(right_indications)
   
-  tf_dataset = tf.data.Dataset.from_tensor_slices((tf_patient_paths,tf_labels,tf_patients))
+  tf_dataset = tf.data.Dataset.from_tensor_slices((tf_patient_paths, tf_labels, tf_patients, tf_left_indications, tf_right_indications))
   tf_dataset = tf_dataset.map(_parse_function_normal)
   tf_dataset = tf_dataset.batch(batch_size)
   tf_iterator = tf_dataset.make_one_shot_iterator()
-  tf_next_left_image,tf_next_left_label,tf_next_right_image,tf_next_right_label,tf_next_patient = tf_iterator.get_next()
-  return tf_next_left_image,tf_next_left_label,tf_next_right_image,tf_next_right_label,tf_next_patient
+  tf_next_left_image,tf_next_left_label, \
+  tf_next_right_image,tf_next_right_label, \
+  tf_next_patient, tf_next_left_indication, tf_next_right_indication = tf_iterator.get_next()  
+  return tf_next_left_image,tf_next_left_label,tf_next_right_image,tf_next_right_label,tf_next_patient,tf_next_left_indication,tf_next_right_indication
   
 if __name__ == '__main__':
-  labels_file = "D:\\kaggle\\detection\\trainLabels\\trainLabels.csv"
-  data_dir = "D:\\kaggle\\detection\\trans_tensorflow\\train"
-  tf_next_left_image,tf_next_left_label,tf_next_right_image,tf_next_right_label,tf_next_patient = distorted_inputs(data_dir,labels_file)
+  labels_file = "C:\\Users\\tanalan\\Documents\\CNN image\\detection\\SampleLabels.csv"
+  data_dir = "C:\\Users\\tanalan\\Documents\\CNN image\\detection\\sample\\train"
+  tf_next_left_image,tf_next_left_label, \
+  tf_next_right_image,tf_next_right_label, \
+  tf_next_patient, tf_next_left_indication, tf_next_right_indication = distorted_inputs(data_dir,labels_file, 1, 3)  
+  import matplotlib.pyplot as plt
+  sess = tf.Session()
+  left,right=sess.run((tf_next_left_image,tf_next_right_image))
+  plt.imshow(left[0])
+
   
   
   

@@ -1,21 +1,15 @@
 """A binary to train diabetes_retinopathy using a single GPU.
 
 Accuracy:
-cifar10_train.py achieves ~86% accuracy after 100K steps (256 epochs of
+diabetes_retinopathy_train.py achieves ~86% accuracy after 100K steps (256 epochs of
 data) as judged by cifar10_eval.py.
 
-Speed: With batch_size 128.
+Speed: With batch_size 32.
 
-System        | Step Time (sec/batch)  |     Accuracy
+System          | Step Time (sec/batch)  |     Accuracy
 ------------------------------------------------------------------
-1 Tesla K20m  | 0.35-0.60              | ~86% at 60K steps  (5 hours)
-1 Tesla K40m  | 0.25-0.35              | ~86% at 100K steps (4 hours)
+GeForce GTX 1070| 0.35-0.60              | 
 
-Usage:
-Please see the tutorial and website for how to download the CIFAR-10
-data set, compile the program and train the model.
-
-http://tensorflow.org/tutorials/deep_cnn/
 """
 from __future__ import absolute_import
 from __future__ import division
@@ -23,6 +17,7 @@ from __future__ import print_function
 
 from datetime import datetime
 import time
+import math
 import argparse
 import tensorflow as tf
 
@@ -50,21 +45,20 @@ def train(last_step):
     # Force input pipeline to CPU:0 to avoid operations sometimes ending up on
     # GPU and resulting in a slow down.
     with tf.device('/cpu:0'):
-      left_images, left_labels, right_images, right_labels, patients = \
-      diabetes_retinopathy.distorted_inputs(FLAGS.data_dir, FLAGS.labels_file,
-                                            FLAGS.num_epochs, FLAGS.batch_size, FLAGS.use_fp16)
+      left_images, left_labels, right_images, right_labels, patients, left_indication, right_indication = \
+      diabetes_retinopathy.distorted_inputs(FLAGS)
 
     # Build a Graph that computes the logits predictions from the
     # inference model.    
     left_logits, right_logits = diabetes_retinopathy.inference(left_images, right_images, 
-                                                               FLAGS.batch_size, FLAGS.use_fp16)
+                                                               left_indication, right_indication, FLAGS)
 
     # Calculate loss.
     loss = diabetes_retinopathy.loss(left_logits, right_logits, left_labels, right_labels)
 
     # Build a Graph that trains the model with one batch of examples and
     # updates the model parameters.
-    train_op = diabetes_retinopathy.train(loss, global_step, FLAGS.batch_size, FLAGS.num_examples_for_train)
+    train_op = diabetes_retinopathy.train(loss, global_step, FLAGS)
 
     class _LoggerHook(tf.train.SessionRunHook):
       """Logs loss and runtime."""
@@ -79,7 +73,7 @@ def train(last_step):
 
       def after_run(self, run_context, run_values):
         if FLAGS.log_frequency == -1:   # how many steps in one epoch 
-          log_frequency = FLAGS.num_examples_for_train // FLAGS.batch_size + 1
+          log_frequency = int(math.ceil(FLAGS.num_examples_for_train / FLAGS.batch_size))
         else:
           log_frequency = FLAGS.log_frequency
           
@@ -112,7 +106,7 @@ def main(argv=None):  # pylint: disable=unused-argument
   if tf.gfile.Exists(FLAGS.train_log_dir):
     tf.gfile.DeleteRecursively(FLAGS.train_log_dir)
   tf.gfile.MakeDirs(FLAGS.train_log_dir)
-  last_step = int(FLAGS.num_examples_for_train / FLAGS.batch_size * FLAGS.num_epochs)
+  last_step = int(math.ceil(FLAGS.num_examples_for_train / FLAGS.batch_size) * FLAGS.num_epochs)
   train(last_step)
 
 
