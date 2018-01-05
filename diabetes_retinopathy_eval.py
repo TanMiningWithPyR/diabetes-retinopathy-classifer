@@ -34,7 +34,7 @@ eval_parser.add_argument('--run_once', type=bool, default=False,
                     help='Whether to run eval only once.')
 
 
-def eval_once(saver, summary_writer, top_k_op, summary_op):
+def eval_once(saver, summary_writer, top_k_op, summary_op, debug_op):
   """Run Eval once.
 
   Args:
@@ -71,15 +71,14 @@ def eval_once(saver, summary_writer, top_k_op, summary_op):
       step = 0
       while step < num_iter and not coord.should_stop():
         if step % 10 == 0:
-          print("The " + str(step) + " step...")
-        try:
-          predictions = sess.run([top_k_op])
-          true_count += np.sum(predictions)
-          step += 1
-        except tf.errors.OutOfRangeError:
-          break
+          print("The " + str(step) + " step...")          
+        predictions, df_log = sess.run([top_k_op, debug_op]) # debug_op 
+        
+        print(df_log)
+        true_count += np.sum(predictions)
+        step += 1
 
-      # Compute precision @ 1.
+    # Compute precision @ 1.
       precision = true_count / (total_sample_count * 2)
       print('%s: precision @ 1 = %.3f' % (datetime.now(), precision))
 
@@ -91,7 +90,7 @@ def eval_once(saver, summary_writer, top_k_op, summary_op):
       coord.request_stop(e)
 
     coord.request_stop()
-    coord.join(threads, stop_grace_period_secs=10)
+    coord.join(threads, stop_grace_period_secs=10)    
 
 
 def evaluate():
@@ -106,11 +105,19 @@ def evaluate():
     # inference model.
     left_logits, right_logits = diabetes_retinopathy.inference(left_images, right_images, 
                                                                left_indication, right_indication, FLAGS)
-
+    
+#    # Calculate loss.
+#    loss_op = diabetes_retinopathy.loss(left_logits, right_logits, left_labels, right_labels, 32)
+    # predict value compare source label
+    p_s_df_op = tf.concat((tf.reshape(tf.cast(left_labels, tf.float32),(-1,1)),
+                           left_logits,
+                           tf.reshape(tf.cast(right_labels, tf.float32),(-1,1)),
+                           right_logits),axis=-1)
     # Calculate predictions.
     left_top_k_op = tf.nn.in_top_k(left_logits, left_labels, 1)
     right_top_k_op = tf.nn.in_top_k(right_logits, right_labels, 1)
     top_k_op = tf.concat([left_top_k_op, right_top_k_op], axis=-1)
+    
     # Restore the moving average version of the learned variables for eval.
     variable_averages = tf.train.ExponentialMovingAverage(
         diabetes_retinopathy.MOVING_AVERAGE_DECAY)
@@ -123,7 +130,7 @@ def evaluate():
     summary_writer = tf.summary.FileWriter(FLAGS.eval_log_dir, g)
 
     while True:
-      eval_once(saver, summary_writer, top_k_op, summary_op)
+      eval_once(saver, summary_writer, top_k_op, summary_op, p_s_df_op)
       if FLAGS.run_once:
         break
       time.sleep(FLAGS.eval_interval_secs)
