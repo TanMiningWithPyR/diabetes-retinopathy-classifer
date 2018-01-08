@@ -197,7 +197,7 @@ def inference(left_images, right_images, left_indication, right_indication, flag
   with tf.variable_scope('conv1') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[7, 7, 3, 32],
-                                         gain=0.01,
+                                         gain=0.1,
                                          wd=0.0,
                                          use_fp16=flags.use_fp16)
     conv_L = tf.nn.conv2d(input=left_images, filter=kernel, strides=[1, 2, 2, 1], padding='SAME')
@@ -220,7 +220,7 @@ def inference(left_images, right_images, left_indication, right_indication, flag
   with tf.variable_scope('conv2') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 32, 32],
-                                         gain=0.01,
+                                         gain=0.1,
                                          wd=0.0,
                                          use_fp16=flags.use_fp16)
     conv_L = tf.nn.conv2d(pool_1L, kernel, [1, 1, 1, 1], padding='SAME')
@@ -237,7 +237,7 @@ def inference(left_images, right_images, left_indication, right_indication, flag
   with tf.variable_scope('conv3') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 32, 32],
-                                         gain=0.01,
+                                         gain=0.1,
                                          wd=0.0,
                                          use_fp16=flags.use_fp16)
     conv_L = tf.nn.conv2d(conv_2L, kernel, [1, 1, 1, 1], padding='SAME')
@@ -260,7 +260,7 @@ def inference(left_images, right_images, left_indication, right_indication, flag
   with tf.variable_scope('conv4') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 32, 64],
-                                         gain=0.01,
+                                         gain=0.1,
                                          wd=0.0,
                                          use_fp16=flags.use_fp16)
     conv_L = tf.nn.conv2d(pool_2L, kernel, [1, 1, 1, 1], padding='SAME')
@@ -277,7 +277,7 @@ def inference(left_images, right_images, left_indication, right_indication, flag
   with tf.variable_scope('conv5') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 64, 64],
-                                         gain=0.01,
+                                         gain=0.1,
                                          wd=0.0,
                                          use_fp16=flags.use_fp16)
     conv_L = tf.nn.conv2d(conv_4L, kernel, [1, 1, 1, 1], padding='SAME')
@@ -294,7 +294,7 @@ def inference(left_images, right_images, left_indication, right_indication, flag
   with tf.variable_scope('conv6') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 64, 64],
-                                         gain=0.01,
+                                         gain=0.1,
                                          wd=0.0,
                                          use_fp16=flags.use_fp16)
     conv_L = tf.nn.conv2d(conv_5L, kernel, [1, 1, 1, 1], padding='SAME')
@@ -316,7 +316,7 @@ def inference(left_images, right_images, left_indication, right_indication, flag
   with tf.variable_scope('conv7') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 64, 128],
-                                         gain=0.01,
+                                         gain=0.1,
                                          wd=0.0,
                                          use_fp16=flags.use_fp16)
     conv_L = tf.nn.conv2d(pool_3L, kernel, [1, 1, 1, 1], padding='SAME')
@@ -333,7 +333,7 @@ def inference(left_images, right_images, left_indication, right_indication, flag
   with tf.variable_scope('conv8') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 128, 128],
-                                         gain=0.01,
+                                         gain=0.1,
                                          wd=0.0,
                                          use_fp16=flags.use_fp16)
     conv_L = tf.nn.conv2d(conv_7L, kernel, [1, 1, 1, 1], padding='SAME')
@@ -350,7 +350,7 @@ def inference(left_images, right_images, left_indication, right_indication, flag
   with tf.variable_scope('conv9') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 128, 128],
-                                         gain=0.01,
+                                         gain=0.1,
                                          wd=0.0,
                                          use_fp16=flags.use_fp16)
     conv_L = tf.nn.conv2d(conv_8L, kernel, [1, 1, 1, 1], padding='SAME')
@@ -367,7 +367,7 @@ def inference(left_images, right_images, left_indication, right_indication, flag
   with tf.variable_scope('conv10') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 128, 128],
-                                         gain=0.01,
+                                         gain=0.1,
                                          wd=0.0,
                                          use_fp16=flags.use_fp16)
     conv_L = tf.nn.conv2d(conv_9L, kernel, [1, 1, 1, 1], padding='SAME')
@@ -390,7 +390,7 @@ def inference(left_images, right_images, left_indication, right_indication, flag
   with tf.variable_scope('conv11') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 128, 256],
-                                         gain=0.01,
+                                         gain=0.1,
                                          wd=0.0,
                                          use_fp16=flags.use_fp16)
     conv_L = tf.nn.conv2d(pool_4L, kernel, [1, 1, 1, 1], padding='SAME')
@@ -407,7 +407,7 @@ def inference(left_images, right_images, left_indication, right_indication, flag
   with tf.variable_scope('conv12') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 256, 256],
-                                         gain=0.01,
+                                         gain=0.1,
                                          wd=0.0,
                                          use_fp16=flags.use_fp16)
     conv_L = tf.nn.conv2d(conv_11L, kernel, [1, 1, 1, 1], padding='SAME')
@@ -424,7 +424,7 @@ def inference(left_images, right_images, left_indication, right_indication, flag
   with tf.variable_scope('conv13') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 256, 256],
-                                         gain=0.01,
+                                         gain=0.1,
                                          wd=0.0,
                                          use_fp16=flags.use_fp16)
     conv_L = tf.nn.conv2d(conv_12L, kernel, [1, 1, 1, 1], padding='SAME')
@@ -441,7 +441,7 @@ def inference(left_images, right_images, left_indication, right_indication, flag
   with tf.variable_scope('conv14') as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 256, 256],
-                                         gain=0.01,
+                                         gain=0.1,
                                          wd=0.0,
                                          use_fp16=flags.use_fp16)
     conv_L = tf.nn.conv2d(conv_13L, kernel, [1, 1, 1, 1], padding='SAME')
@@ -469,7 +469,7 @@ def inference(left_images, right_images, left_indication, right_indication, flag
     reshape_L = tf.reshape(dropout_1L, [-1, 16384])
     reshape_R = tf.reshape(dropout_1R, [-1, 16384])
     weights = _variable_with_weight_decay('weights', shape=[16384, 512, 2],
-                                          gain=0.01, wd=0.0, use_fp16=flags.use_fp16)    
+                                          gain=0.1, wd=0.0, use_fp16=flags.use_fp16)    
     biases = _variable_on_cpu('biases', [512, 2], tf.constant_initializer(0.1), flags.use_fp16)
     maxout_L = tf.tensordot(reshape_L, weights, axes=1) + biases
     maxout_1L = tf.reduce_max(maxout_L, axis=2, name=scope.name)
@@ -495,7 +495,7 @@ def inference(left_images, right_images, left_indication, right_indication, flag
   with tf.variable_scope('maxout2') as scope:
     reshape = tf.reshape(dropout_2M, [-1, 1028])
     weights = _variable_with_weight_decay('weights', shape=[1028, 512, 2],
-                                          gain=0.01, wd=0.0, use_fp16=flags.use_fp16)    
+                                          gain=0.1, wd=0.0, use_fp16=flags.use_fp16)    
     biases = _variable_on_cpu('biases', [512, 2], tf.constant_initializer(0.1), flags.use_fp16)
     maxout = tf.tensordot(reshape, weights, axes=1) + biases
     maxout_2M = tf.reduce_max(maxout, axis=2, name='maxout2')
@@ -510,7 +510,7 @@ def inference(left_images, right_images, left_indication, right_indication, flag
   # and performs the softmax internally for efficiency.
   with tf.variable_scope('softmax_linear') as scope:
     weights = _variable_with_weight_decay('weights', [512, 2*NUM_CLASSES],
-                                          gain=0.01, wd=0.0, use_fp16=flags.use_fp16)
+                                          gain=0.1, wd=0.0, use_fp16=flags.use_fp16)
     biases = _variable_on_cpu('biases', [2*NUM_CLASSES], tf.constant_initializer(0.1), flags.use_fp16)
     softmax_linear = tf.add(tf.matmul(dropout_3M, weights), biases, name=scope.name)
     _activation_summary(softmax_linear)
@@ -618,7 +618,7 @@ def train(total_loss, global_step, flags):
 
   # Compute gradients.
   with tf.control_dependencies([loss_averages_op]):
-    opt = tf.train.AdamOptimizer()
+    opt = tf.train.MomentumOptimizer(learning_rate=lr, momentum=0.9, use_nesterov=True)
     grads = opt.compute_gradients(total_loss)
 
   # Apply gradients.

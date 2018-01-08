@@ -74,7 +74,7 @@ def eval_once(saver, summary_writer, top_k_op, summary_op, debug_op):
           print("The " + str(step) + " step...")          
         predictions, df_log = sess.run([top_k_op, debug_op]) # debug_op 
         
-        print(df_log)
+#        print(df_log)
         true_count += np.sum(predictions)
         step += 1
 

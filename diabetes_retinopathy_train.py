@@ -113,15 +113,17 @@ def train(last_step):
         
       def before_run(self, run_context):
         self._step += 1
-        return tf.train.SessionRunArgs(loss)
+        return tf.train.SessionRunArgs([loss, accuracy_op])
     
       def after_run(self, run_context, run_values):
-        if self._step == self._save_steps:
-          if run_values < self._min_loss:
-            self._min_loss = run_values
+#        if self._step % self._save_steps == self._save_steps - 1:
+          if run_values.results[0] < self._min_loss:
+            self._min_loss = run_values.results[0]
             self._saver.save(run_context.session, self._save_path, self._step) 
+            format_str = ('%s: step %d, loss = %.2f, accuracy_value = %.3f , weight was saved')
+            print (format_str % (datetime.now(), self._step, run_values.results[0], run_values.results[1]))  
           
-    mysaver=tf.train.Saver(max_to_keep=5)
+    mysaver=tf.train.Saver(max_to_keep=7)
     
     with tf.train.MonitoredTrainingSession(        
         checkpoint_dir=FLAGS.train_log_dir,
