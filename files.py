@@ -19,8 +19,8 @@ parser.add_argument('--data_dir', type=str, default='C:\\Users\\tanalan\\Documen
                     help='Path to the diabetes_retinopathy data directory.')
 parser.add_argument('--picture_type', type=str, default='jpeg',
                     help='the picture type, such as png, jpeg.')
-parser.add_argument('--split_num', type=int, default=None,
-					       help='how many sub sets splitted from source data ')
+parser.add_argument('--split_num', type=int, default=None, choices=[2, 3],
+					       help='how many sub sets splitted from source data. ')
 parser.add_argument('--reverse_op', type=bool, default=False,
                     help='reverse operation for the files moving.')
 parser.add_argument('--rmdir', type=str, default=None,

@@ -19,18 +19,20 @@ IMAGE_SIZE = 512
 
 input_parser = argparse.ArgumentParser(add_help=False)
 # Global constants describing the diabetes retinopathy data set.
-input_parser.add_argument('--data_dir', type=str, default="D:\\kaggle\\detection\\trans_tensorflow",
+input_parser.add_argument('--data_dir', type=str, default="D:\\kaggle\\detection\\train_tensorflow_512",
                     help='Path to the diabetes_retinopathy data directory.')
 input_parser.add_argument('--labels_file', type=str, default="D:\\kaggle\\detection\\trainLabels\\trainLabels.csv",
                     help='Path to the diabetes_retinopathy labels file.')
 input_parser.add_argument('--batch_size', type=int, default=32,
                     help='Number of images to process in a batch.')
-input_parser.add_argument('--num_examples_for_train', type=int, default=12192,
+input_parser.add_argument('--num_examples_for_train', type=int, default=12288,
                     help='num examples per epoch for train.')
-input_parser.add_argument('--num_examples_for_eval', type=int, default=5351,
+input_parser.add_argument('--num_examples_for_eval', type=int, default=5255,
                     help='num examples per epoch for evaluation.')
 input_parser.add_argument('--num_epochs', type=int, default=60,
                     help='num epochs for train.')
+input_parser.add_argument('--imbalance_ratio', type=int, default=3,
+                    help='positive // negative')
 input_parser.add_argument('--eval_data', type=str, default='test',
                     help='Either `test` or `train_eval`.')
 
@@ -112,13 +114,14 @@ def _parse_function_normal(tf_patient_path,tf_label,tf_patient,tf_left_indicatio
   tf_left_label,tf_right_label = tf_label[0],tf_label[1]
   return tf_left_image, tf_left_label, tf_right_image, tf_right_label, tf_patient, tf_left_indication, tf_right_indication 
   
-def distorted_inputs(data_dir, labels_file,  batch_size, repeat=None):
+def distorted_inputs(data_dir, labels_file,  batch_size, imbalance_ratio=1, repeat=None):
   """Construct distorted input for diabetes retinopathy training using the Reader ops.
 
   Args:
     data_dir: Path to the diabetes retinopathy data directory.
     labels_file: Path to the label_file(.csv) for each eyes.
     batch_size: Number of images per batch.
+    imbalance_ratio: Number of positive // Number of negative 
     repeat: how many times this dataset repeats during training. The default behavior is for the elements to be repeated indefinitely    
 
   Returns:
@@ -126,18 +129,26 @@ def distorted_inputs(data_dir, labels_file,  batch_size, repeat=None):
     labels: Labels. 1D tensor of [batch_size] size.
   """
   patients = os.listdir(data_dir)
-  patient_paths = [os.path.join(data_dir, patient) for patient in patients]
-
   df_labels = read_label(labels_file)
-  labels = [list(df_labels.ix[patient].values) for patient in patients]
+  # oversample and shuffle
+  bad_patients = [patient for patient in patients if sum(list(df_labels.ix[patient].values)) > 0 ]
+  oversamples = patients + (imbalance_ratio - 1) * bad_patients
+  num_step_in_epoch = len(oversamples) // batch_size
+  num_examples_in_epoch = num_step_in_epoch * batch_size
+  print("Training samples number after oversample: " + str(num_examples_in_epoch))
+  random.shuffle(oversamples)
+  patients_by_oversample = oversamples[0:num_examples_in_epoch]
+  
+  patient_paths = [os.path.join(data_dir, patient) for patient in patients_by_oversample]
+  labels = [list(df_labels.ix[patient].values) for patient in patients_by_oversample]
 
-  pair_eyes_count = len(patients)
+  pair_eyes_count = len(patients_by_oversample)
   left_indications = pair_eyes_count * [(1.0, 0.0)]
   right_indications = pair_eyes_count * [(0.0, 1.0)]
 
   tf_patient_paths = tf.constant(patient_paths)
   tf_labels = tf.constant(labels)
-  tf_patients = tf.constant(patients)
+  tf_patients = tf.constant(patients_by_oversample)
   tf_left_indications = tf.constant(left_indications)
   tf_right_indications = tf.constant(right_indications)
   
@@ -171,7 +182,7 @@ def inputs(data_dir, labels_file, batch_size):
   patients = os.listdir(data_dir)
   patient_paths = [os.path.join(data_dir,patient) for patient in patients]
 
-  df_labels = read_label(labels_file)
+  df_labels = read_label(labels_file)  
   labels = [list(df_labels.ix[patient].values) for patient in patients]
 
   pair_eyes_count = len(patients)
@@ -194,21 +205,16 @@ def inputs(data_dir, labels_file, batch_size):
   return tf_next_left_image,tf_next_left_label,tf_next_right_image,tf_next_right_label,tf_next_patient,tf_next_left_indication,tf_next_right_indication
   
 if __name__ == '__main__':
-  labels_file = "C:\\Users\\tanalan\\Documents\\CNN image\\detection\\SampleLabels.csv"
-  data_dir = "C:\\Users\\tanalan\\Documents\\CNN image\\detection\\sample\\train"
+  labels_file = "D:\\kaggle\\detection\\trainLabels\\trainLabels.csv"
+  data_dir = "D:\\kaggle\\detection\\trans_tensorflow\\train"
   tf_next_left_image,tf_next_left_label, \
   tf_next_right_image,tf_next_right_label, \
-  tf_next_patient, tf_next_left_indication, tf_next_right_indication = distorted_inputs(data_dir,labels_file, 1, 3)  
+  tf_next_patient, examples_num, tf_next_left_indication, tf_next_right_indication = distorted_inputs(data_dir,labels_file, 32, 1)  
   import matplotlib.pyplot as plt
   sess = tf.Session()
   left,right=sess.run((tf_next_left_image,tf_next_right_image))
   plt.imshow(left[0])
 
-  
-  
-  
-  
-  
   
   
   

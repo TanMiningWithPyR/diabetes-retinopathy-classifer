@@ -74,7 +74,7 @@ def eval_once(saver, summary_writer, top_k_op, summary_op, debug_op):
           print("The " + str(step) + " step...")          
         predictions, df_log = sess.run([top_k_op, debug_op]) # debug_op 
         
-#        print(df_log)
+        print(df_log)
         true_count += np.sum(predictions)
         step += 1
 
@@ -110,9 +110,9 @@ def evaluate():
 #    loss_op = diabetes_retinopathy.loss(left_logits, right_logits, left_labels, right_labels, 32)
     # predict value compare source label
     p_s_df_op = tf.concat((tf.reshape(tf.cast(left_labels, tf.float32),(-1,1)),
-                           left_logits,
+                           tf.nn.softmax(left_logits),
                            tf.reshape(tf.cast(right_labels, tf.float32),(-1,1)),
-                           right_logits),axis=-1)
+                           tf.nn.softmax(right_logits)),axis=-1)
     # Calculate predictions.
     left_top_k_op = tf.nn.in_top_k(left_logits, left_labels, 1)
     right_top_k_op = tf.nn.in_top_k(right_logits, right_labels, 1)

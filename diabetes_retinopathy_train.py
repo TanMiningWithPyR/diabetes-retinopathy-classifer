@@ -21,6 +21,7 @@ import time
 import math
 import argparse
 import tensorflow as tf
+import numpy as np
 
 import diabetes_retinopathy
 
@@ -48,22 +49,24 @@ def train(last_step):
     #with tf.device('/cpu:0'):
     left_images, left_labels, right_images, right_labels, patients, examples_num, left_indication, right_indication = \
     diabetes_retinopathy.distorted_inputs(FLAGS)
-
+    
+    labels = tf.concat([left_labels, right_labels], 0)
+    images = tf.concat([left_images, right_images], 0)
+    indication = tf.concat([left_indication, right_indication], 0)
+    
     # Build a Graph that computes the logits predictions from the
     # inference model.    
-    left_logits, right_logits = diabetes_retinopathy.inference(left_images, right_images, 
-                                                               left_indication, right_indication, FLAGS)
+    logits = diabetes_retinopathy.inference(images, indication, FLAGS)
 
     # Calculate loss.
-    loss = diabetes_retinopathy.loss(left_logits, right_logits, left_labels, right_labels, examples_num)
+    loss = diabetes_retinopathy.loss(logits, labels, examples_num)
 
     # Build a Graph that trains the model with one batch of examples and
     # updates the model parameters.
     train_op = diabetes_retinopathy.train(loss, global_step, FLAGS)
     
     # Calculate accuracy.
-    accuracy_op = diabetes_retinopathy.eval_train_data(left_logits, right_logits,
-                                                       left_labels, right_labels)
+    accuracy_op = diabetes_retinopathy.eval_train_data(logits, labels)
 
     class _LoggerHook(tf.train.SessionRunHook):
       """Logs loss and runtime."""
@@ -95,7 +98,7 @@ def train(last_step):
           accuracy_value = run_values.results[1]
           steps_per_sec = self._log_frequency / duration
           sec_per_sec = float(duration / self._log_frequency)
-          format_str = ('%s: step %d, epoch %d end, loss = %.2f, accuracy_value = %.3f (%.3f steps/sec; %.3f sec/step)')
+          format_str = ('%s: step %d, epoch %d end, loss = %.3f, accuracy_value = %.3f (%.3f steps/sec; %.3f sec/step)')
           print (format_str % (datetime.now(), self._step, self._epoch, loss_value, accuracy_value,
                                steps_per_sec, sec_per_sec))       
 
@@ -109,21 +112,26 @@ def train(last_step):
         
       def begin(self):
         self._step = -1
-        self._min_loss = 10 ** 5
+        self._min_loss_arr = np.array(5 * [10.0 ** 5])
         
       def before_run(self, run_context):
         self._step += 1
+        self._min_loss = np.max(self._min_loss_arr)
+        self._max_ind = np.argmax(self._min_loss_arr)
         return tf.train.SessionRunArgs([loss, accuracy_op])
     
       def after_run(self, run_context, run_values):
-#        if self._step % self._save_steps == self._save_steps - 1:
-          if run_values.results[0] < self._min_loss:
-            self._min_loss = run_values.results[0]
+        if run_values.results[0] < self._min_loss:
+          if self._step % self._save_steps == self._save_steps - 1:          
+            self._min_loss_arr[self._max_ind] = run_values.results[0]
             self._saver.save(run_context.session, self._save_path, self._step) 
-            format_str = ('%s: step %d, loss = %.2f, accuracy_value = %.3f , weight was saved')
+            format_str = ('%s: step %d, loss = %.3f, accuracy_value = %.3f, weights was saved')
             print (format_str % (datetime.now(), self._step, run_values.results[0], run_values.results[1]))  
+          elif self._step % 20 == 0:
+            format_str = ('%s: step %d, loss = %.5f, accuracy_value = %.3f')
+            print (format_str % (datetime.now(), self._step, run_values.results[0], run_values.results[1]))             
           
-    mysaver=tf.train.Saver(max_to_keep=7)
+    mysaver=tf.train.Saver(max_to_keep=5)
     
     with tf.train.MonitoredTrainingSession(        
         checkpoint_dir=FLAGS.train_log_dir,
@@ -131,7 +139,7 @@ def train(last_step):
         hooks=[tf.train.StopAtStepHook(last_step=last_step),
                tf.train.NanTensorHook(loss),
                _LoggerHook(),
-               _saverHook(FLAGS.train_log_dir, 381, mysaver)],
+               _saverHook(FLAGS.train_log_dir, 384, mysaver)],
         config=tf.ConfigProto(
             log_device_placement=FLAGS.log_device_placement)) as mon_sess:
       while not mon_sess.should_stop():
