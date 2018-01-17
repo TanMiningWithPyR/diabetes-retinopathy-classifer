@@ -27,11 +27,11 @@ input_parser.add_argument('--batch_size', type=int, default=32,
                     help='Number of images to process in a batch.')
 input_parser.add_argument('--num_examples_for_train', type=int, default=12288,
                     help='num examples per epoch for train.')
-input_parser.add_argument('--num_examples_for_eval', type=int, default=5255,
+input_parser.add_argument('--num_examples_for_eval', type=int, default=5248,
                     help='num examples per epoch for evaluation.')
 input_parser.add_argument('--num_epochs', type=int, default=60,
                     help='num epochs for train.')
-input_parser.add_argument('--imbalance_ratio', type=int, default=3,
+input_parser.add_argument('--imbalance_ratio', type=int, default=1,
                     help='positive // negative')
 input_parser.add_argument('--eval_data', type=str, default='test',
                     help='Either `test` or `train_eval`.')
@@ -45,57 +45,27 @@ def read_label(labels_file):
   df_labels = pd.concat([df_labels,patient], axis=1)
   df_labels = df_labels.pivot('patient', 'l_r', 'level')
   return df_labels
-
-def _crop_image(tf_image):
-  tf_shape = tf.shape(tf_image)  
-  tf_height = tf_shape[0]
-  tf_width = tf_shape[1]
-  tf_height_m,tf_width_m = tf_height//2 + 1,tf_width//2 + 1  # the middle points of height and width
-
-  tf_height_MiddleLine_RGBsum = tf.to_float(tf.reduce_sum(tf_image[tf_height_m,:,:],1))
-  tf_height_none_threshold = tf.reduce_mean(tf_height_MiddleLine_RGBsum)/500 # the points less than this value regarded as black
-  tf_r_width_point = tf.to_int32(tf_height_MiddleLine_RGBsum > tf_height_none_threshold)
-  tf_r_width = tf.reduce_sum(tf_r_width_point)//2 + 1
-
-  tf_width_MiddleLine_RGBsum = tf.to_float(tf.reduce_sum(tf_image[:,tf_width_m,:],1))
-  tf_width_none_threshold = tf.reduce_mean(tf_width_MiddleLine_RGBsum)/500
-  tf_r_height_point = tf.to_int32(tf_width_MiddleLine_RGBsum > tf_width_none_threshold)
-  tf_r_height = tf.reduce_sum(tf_r_height_point)//2 + 1 
-  tf_image_cropped = tf.cond(tf_r_width > tf_r_height, 
-    lambda: tf.image.resize_image_with_crop_or_pad(tf_image, 2*tf_r_width, 2*tf_r_width),
-    lambda: tf.image.resize_image_with_crop_or_pad(tf_image, 2*tf_r_height, 2*tf_r_height))
-  return tf_image_cropped
-
-def _random_rotate(tf_image, max_angle=10):
-  random_angle = random.randint(-max_angle,max_angle) * 3.14 / 180
-  tf_image_rotate = tf.contrib.image.rotate(tf_image,random_angle)
-  return tf_image_rotate
   
-def _transform_image(tf_filename,random_op=True):   
-  with tf.device('/cpu:0'):
-    tf_image_string = tf.read_file(tf_filename)
-  with tf.device('/gpu:0'):
-    tf_image_decoded = tf.image.decode_image(tf_image_string)
-    tf_image_cropped = _crop_image(tf_image_decoded)
-    tf_image_resized = tf.image.resize_images(tf_image_cropped, 
-      [IMAGE_SIZE, IMAGE_SIZE], 
-      method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-    tf_distorted_image = tf_image_resized
+def _transform_image(tf_filename, random_op=True):   
+  tf_image_string = tf.read_file(tf_filename)
+  tf_image_decoded = tf.image.decode_image(tf_image_string)  
+  tf_distorted_image = tf_image_decoded
   # Image processing for training the network. Note the many random
   # distortions applied to the image.
   # Because these operations are not commutative, consider randomizing
   # the order their operation.
   # NOTE: since per_image_standardization zeros the mean and makes
   # the stddev unit, this likely has no effect (see tensorflow#1458).
-    if random_op:
-#      tf_distorted_image = tf.image.random_contrast(tf_distorted_image, lower=0.2, upper=1.8)
-#      tf_distorted_image = tf.image.random_brightness(tf_distorted_image, max_delta=0.2)
-#      tf_distorted_image = tf.image.random_saturation(tf_distorted_image, lower=0.9, upper=2)
-#      tf_distorted_image = tf.image.random_hue(tf_distorted_image, max_delta=0.02)
-      # rotate
-      tf_distorted_image = _random_rotate(tf_distorted_image)
+  if random_op:
+    tf_distorted_image = tf.image.random_contrast(tf_distorted_image, lower=0.2, upper=1.8)
+#    # rotate
+#    tf_distorted_image = _random_rotate(tf_distorted_image)
+    tf_distorted_image = tf.image.random_brightness(tf_distorted_image, max_delta=0.2)
+    tf_distorted_image = tf.image.random_saturation(tf_distorted_image, lower=0.9, upper=2)
+    tf_distorted_image = tf.image.random_hue(tf_distorted_image, max_delta=0.02)
   # Subtract off the mean and divide by the variance of the pixels.
-    tf_distorted_image = tf.image.per_image_standardization(tf_distorted_image)
+  # tf_distorted_image = tf.image.per_image_standardization(tf_distorted_image)
+  tf_distorted_image = tf_distorted_image / 255
   return tf_distorted_image
 
 def _parse_function_distorted(tf_patient_path,tf_label,tf_patient,tf_left_indication,tf_right_indication):  
@@ -207,14 +177,26 @@ def inputs(data_dir, labels_file, batch_size):
 if __name__ == '__main__':
   labels_file = "D:\\kaggle\\detection\\trainLabels\\trainLabels.csv"
   data_dir = "D:\\kaggle\\detection\\trans_tensorflow\\train"
-  tf_next_left_image,tf_next_left_label, \
-  tf_next_right_image,tf_next_right_label, \
-  tf_next_patient, examples_num, tf_next_left_indication, tf_next_right_indication = distorted_inputs(data_dir,labels_file, 32, 1)  
+#  tf_next_left_image,tf_next_left_label, \
+#  tf_next_right_image,tf_next_right_label, \
+#  tf_next_patient, examples_num, tf_next_left_indication, tf_next_right_indication = distorted_inputs(data_dir,labels_file, 32, 1)  
+  file_name = "D:\\kaggle\\detection\\train_tensorflow_512\\test\\17\\left.jpeg"
   import matplotlib.pyplot as plt
   sess = tf.Session()
-  left,right=sess.run((tf_next_left_image,tf_next_right_image))
-  plt.imshow(left[0])
+#  left,right=sess.run((tf_next_left_image,tf_next_right_image))
+#  plt.imshow(left[0])
+#  pic = _transform_image(file_name, random_op=True)
+  pic = tf.read_file(file_name)
+  pic = tf.image.decode_jpeg(pic)
+  pic = tf.reshape(pic, shape=[512,512,3])
 
+  from scipy import misc 
+  def _random_rotate(tf_image, max_angle=10):
+    random_angle = random.randint(-max_angle, max_angle) * 3.14 / 180
+    image_rotate = misc.imrotate(tf_image, random_angle, 'bicubic')
+    return image_rotate
+  p = sess.run(pic) 
+  plt.imshow(p)
   
   
   

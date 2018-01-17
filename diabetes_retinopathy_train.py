@@ -46,9 +46,9 @@ def train(last_step):
     # Get images and labels for diabete_retinopathy.
     # Force input pipeline to CPU:0 to avoid operations sometimes ending up on
     # GPU and resulting in a slow down.
-    #with tf.device('/cpu:0'):
-    left_images, left_labels, right_images, right_labels, patients, examples_num, left_indication, right_indication = \
-    diabetes_retinopathy.distorted_inputs(FLAGS)
+    with tf.device('/cpu:0'):
+      left_images, left_labels, right_images, right_labels, patients, examples_num, left_indication, right_indication = \
+      diabetes_retinopathy.distorted_inputs(FLAGS)
     
     labels = tf.concat([left_labels, right_labels], 0)
     images = tf.concat([left_images, right_images], 0)
@@ -67,6 +67,17 @@ def train(last_step):
     
     # Calculate accuracy.
     accuracy_op = diabetes_retinopathy.eval_train_data(logits, labels)
+    
+#    with tf.device('/cpu:0'):
+#      e_left_images, e_left_labels, e_right_images, e_right_labels, e_patients, e_examples_num, e_left_indication, e_right_indication = \
+#      diabetes_retinopathy.inputs(FLAGS)   
+#     
+#    e_labels = tf.concat([e_left_labels, e_right_labels], 0)
+#    e_images = tf.concat([e_left_images, e_right_images], 0)   
+#    e_indication = tf.concat([e_left_indication, e_right_indication], 0)
+#    e_logits = diabetes_retinopathy.inference(e_images, e_indication, FLAGS)
+#    
+#    accuracy_op_eval = diabetes_retinopathy.eval_train_data(e_logits, e_labels)
 
     class _LoggerHook(tf.train.SessionRunHook):
       """Logs loss and runtime."""
@@ -78,8 +89,8 @@ def train(last_step):
           self.log_frequency = FLAGS.log_frequency  
           
       def begin(self):
-        self._step = -1
-        
+        self._step = -1    
+      
       def before_run(self, run_context):
         self._step += 1          
         if self._step % self._log_frequency == 0:  
@@ -100,7 +111,7 @@ def train(last_step):
           sec_per_sec = float(duration / self._log_frequency)
           format_str = ('%s: step %d, epoch %d end, loss = %.3f, accuracy_value = %.3f (%.3f steps/sec; %.3f sec/step)')
           print (format_str % (datetime.now(), self._step, self._epoch, loss_value, accuracy_value,
-                               steps_per_sec, sec_per_sec))       
+                               steps_per_sec, sec_per_sec))           
 
     class _saverHook(tf.train.SessionRunHook):
       def __init__(self, checkpoint_dir, save_steps, saver, checkpoint_basename="model.ckpt",):
@@ -113,23 +124,24 @@ def train(last_step):
       def begin(self):
         self._step = -1
         self._min_loss_arr = np.array(5 * [10.0 ** 5])
-        
+    
       def before_run(self, run_context):
         self._step += 1
         self._min_loss = np.max(self._min_loss_arr)
         self._max_ind = np.argmax(self._min_loss_arr)
         return tf.train.SessionRunArgs([loss, accuracy_op])
-    
+  
       def after_run(self, run_context, run_values):
         if run_values.results[0] < self._min_loss:
-          if self._step % self._save_steps == self._save_steps - 1:          
+          if self._step % self._save_steps == self._save_steps - 1 or self._step == 0:          
             self._min_loss_arr[self._max_ind] = run_values.results[0]
             self._saver.save(run_context.session, self._save_path, self._step) 
             format_str = ('%s: step %d, loss = %.3f, accuracy_value = %.3f, weights was saved')
-            print (format_str % (datetime.now(), self._step, run_values.results[0], run_values.results[1]))  
-          elif self._step % 20 == 0:
-            format_str = ('%s: step %d, loss = %.5f, accuracy_value = %.3f')
-            print (format_str % (datetime.now(), self._step, run_values.results[0], run_values.results[1]))             
+            print (format_str % (datetime.now(), self._step, run_values.results[0], run_values.results[1])) 
+                
+        if self._step % 20 == 0:
+          format_str = ('%s: step %d, loss = %.5f, accuracy_value = %.3f')
+          print (format_str % (datetime.now(), self._step, run_values.results[0], run_values.results[1]))             
           
     mysaver=tf.train.Saver(max_to_keep=5)
     

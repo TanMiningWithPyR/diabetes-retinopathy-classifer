@@ -74,7 +74,7 @@ def eval_once(saver, summary_writer, top_k_op, summary_op, debug_op):
           print("The " + str(step) + " step...")          
         predictions, df_log = sess.run([top_k_op, debug_op]) # debug_op 
         
-        print(df_log)
+#        print(df_log)
         true_count += np.sum(predictions)
         step += 1
 
@@ -101,29 +101,27 @@ def evaluate():
       left_images, left_labels, right_images, right_labels, patients,left_indication, right_indication = \
       diabetes_retinopathy.inputs(FLAGS)
 
+    labels = tf.concat([left_labels, right_labels], 0)
+    images = tf.concat([left_images, right_images], 0)
+    indication = tf.concat([left_indication, right_indication], 0)  
+    patients = tf.concat([patients,patients],0)
+
     # Build a Graph that computes the logits predictions from the
     # inference model.
-    left_logits, right_logits = diabetes_retinopathy.inference(left_images, right_images, 
-                                                               left_indication, right_indication, FLAGS)
-    
-#    # Calculate loss.
-#    loss_op = diabetes_retinopathy.loss(left_logits, right_logits, left_labels, right_labels, 32)
+    logits = diabetes_retinopathy.inference(images, indication, FLAGS) 
+
     # predict value compare source label
-    p_s_df_op = tf.concat((tf.reshape(tf.cast(left_labels, tf.float32),(-1,1)),
-                           tf.nn.softmax(left_logits),
-                           tf.reshape(tf.cast(right_labels, tf.float32),(-1,1)),
-                           tf.nn.softmax(right_logits)),axis=-1)
+    p_s_df_op =  [patients,labels,tf.nn.softmax(logits)]
+    
     # Calculate predictions.
-    left_top_k_op = tf.nn.in_top_k(left_logits, left_labels, 1)
-    right_top_k_op = tf.nn.in_top_k(right_logits, right_labels, 1)
-    top_k_op = tf.concat([left_top_k_op, right_top_k_op], axis=-1)
+    top_k_op = tf.nn.in_top_k(logits, labels, 1)
     
     # Restore the moving average version of the learned variables for eval.
     variable_averages = tf.train.ExponentialMovingAverage(
         diabetes_retinopathy.MOVING_AVERAGE_DECAY)
     variables_to_restore = variable_averages.variables_to_restore()
     saver = tf.train.Saver(variables_to_restore)
-
+#    saver = tf.train.Saver()
     # Build the summary operation based on the TF collection of Summaries.
     summary_op = tf.summary.merge_all()
 
