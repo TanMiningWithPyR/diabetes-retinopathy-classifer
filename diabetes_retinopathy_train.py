@@ -29,7 +29,7 @@ train_parser = argparse.ArgumentParser(parents=[diabetes_retinopathy.model_parse
                                        add_help=True, 
                                        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-train_parser.add_argument('--train_log_dir', type=str, default='D:\\AlanTan\\CNN\\diabetes_retinopathy_tensorflow\\diabetes_retinopathy_classifer_tensorflow_train',
+train_parser.add_argument('--train_log_dir', type=str, default='D:\\AlanTan\\CNN\\diabetes_retinopathy_tensorflow\\diabetes_retinopathy_classifer_tensorflow_train3',
                     help='Directory where to write event logs and checkpoint.')
 
 train_parser.add_argument('--log_device_placement', type=bool, default=False,
@@ -48,7 +48,7 @@ def train(last_step):
     # GPU and resulting in a slow down.
     with tf.device('/cpu:0'):
       left_images, left_labels, right_images, right_labels, patients, examples_num, left_indication, right_indication = \
-      diabetes_retinopathy.distorted_inputs(FLAGS)
+      diabetes_retinopathy.distorted_inputs(FLAGS, global_step)
     
     labels = tf.concat([left_labels, right_labels], 0)
     images = tf.concat([left_images, right_images], 0)
@@ -123,18 +123,18 @@ def train(last_step):
         
       def begin(self):
         self._step = -1
-        self._min_loss_arr = np.array(5 * [10.0 ** 5])
+        self._accurancy_arr = np.array([0.1,0.25,0.76,0.78,0.8,0.82,0.84,0.86,0.88])
+        self._accurancy_index = 0
     
       def before_run(self, run_context):
         self._step += 1
-        self._min_loss = np.max(self._min_loss_arr)
-        self._max_ind = np.argmax(self._min_loss_arr)
+        self._saved_accurancy = self._accurancy_arr[self._accurancy_index]
         return tf.train.SessionRunArgs([loss, accuracy_op])
   
       def after_run(self, run_context, run_values):
-        if run_values.results[0] < self._min_loss:
+        if run_values.results[1] >= self._saved_accurancy:
           if self._step % self._save_steps == self._save_steps - 1 or self._step == 0:          
-            self._min_loss_arr[self._max_ind] = run_values.results[0]
+            self._accurancy_index = self._accurancy_index + 1
             self._saver.save(run_context.session, self._save_path, self._step) 
             format_str = ('%s: step %d, loss = %.3f, accuracy_value = %.3f, weights was saved')
             print (format_str % (datetime.now(), self._step, run_values.results[0], run_values.results[1])) 
@@ -143,7 +143,7 @@ def train(last_step):
           format_str = ('%s: step %d, loss = %.5f, accuracy_value = %.3f')
           print (format_str % (datetime.now(), self._step, run_values.results[0], run_values.results[1]))             
           
-    mysaver=tf.train.Saver(max_to_keep=5)
+    mysaver=tf.train.Saver(max_to_keep=6)
     
     with tf.train.MonitoredTrainingSession(        
         checkpoint_dir=FLAGS.train_log_dir,

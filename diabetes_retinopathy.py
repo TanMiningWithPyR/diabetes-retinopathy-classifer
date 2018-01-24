@@ -43,9 +43,9 @@ NUM_CLASSES = diabetes_retinopathy_input.NUM_CLASSES
 
 # Constants describing the training process.
 MOVING_AVERAGE_DECAY = 0.9999               # The decay to use for the moving average.
-NUM_EPOCHS_PER_DECAY = 20.0                 # Epochs after which learning rate decays.
+NUM_EPOCHS_PER_DECAY = 50.0                 # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = np.sqrt(0.1)   # Learning rate decay factor.
-INITIAL_LEARNING_RATE = 0.001               # Initial learning rate.
+INITIAL_LEARNING_RATE = 0.00003              # Initial learning rate.
 
 # If a model is trained with multiple GPUs, prefix all Op names with tower_name
 # to differentiate the operations. Note that this prefix is removed from the
@@ -85,6 +85,7 @@ def _variable_on_cpu(name, shape, initializer, use_fp16):
   with tf.device('/cpu:0'):
     dtype = tf.float16 if use_fp16 else tf.float32
     var = tf.get_variable(name, shape, initializer=initializer, dtype=dtype)
+    tf.add_to_collection('restore_variables', var)
   return var
 
 
@@ -109,8 +110,8 @@ def _variable_with_weight_decay(name, shape, init_parameter, wd, use_fp16):
       name,
       shape,
 #      tf.truncated_normal_initializer(stddev=init_parameter, dtype=dtype),
-#      tf.orthogonal_initializer(gain=init_parameter, seed=None, dtype=dtype),
-      None,
+      tf.orthogonal_initializer(gain=init_parameter, seed=None, dtype=dtype),
+#      None,
       use_fp16)
   if wd is not None:
     weight_decay = tf.multiply(tf.nn.l2_loss(var), wd, name='weight_loss')
@@ -118,7 +119,7 @@ def _variable_with_weight_decay(name, shape, init_parameter, wd, use_fp16):
   return var
 
 
-def distorted_inputs(flags):
+def distorted_inputs(flags, globel_step):
   """Construct distorted input for diabetes_retinopathy training using the Reader ops.
 
   Returns:
@@ -135,12 +136,26 @@ def distorted_inputs(flags):
     raise ValueError('Please supply train folder in data_dir')
   if not flags.labels_file:
     raise ValueError('Please supply a labels_file')  
+#  def f1(): 
+#    return diabetes_retinopathy_input.distorted_inputs(data_dir=train_dir, labels_file=flags.labels_file,
+#                                              batch_size=flags.batch_size, 
+#                                              balance_sample=True,
+#                                              repeat=flags.imbalance_step)
+#  def f2():
+#    return diabetes_retinopathy_input.distorted_inputs(data_dir=train_dir, labels_file=flags.labels_file,
+#                                              batch_size=flags.batch_size, 
+#                                              balance_sample=False,
+#                                              repeat=flags.num_epochs - flags.imbalance_step) 
+#    
+#  left_images,left_labels,right_images,right_labels,patients,examples_num,left_indication,right_indication = \
+#  tf.case([(tf.less(globel_step, tf.constant(flags.imbalance_step, dtype=tf.int64)), f2)], default=f1)
+
   left_images,left_labels,right_images,right_labels,patients,examples_num,left_indication,right_indication = \
   diabetes_retinopathy_input.distorted_inputs(data_dir=train_dir, labels_file=flags.labels_file,
-                                              batch_size=flags.batch_size, 
-                                              imbalance_ratio=flags.imbalance_ratio,
-                                              repeat=flags.num_epochs)
-
+                                          batch_size=flags.batch_size, 
+                                          balance_sample=flags.balance_sample,
+                                          repeat=flags.num_epochs)
+  
   if flags.use_fp16:
     left_images = tf.cast(left_images, tf.float16)
     left_labels = tf.cast(left_labels, tf.float16)
@@ -388,28 +403,90 @@ def inference(images, indication, flags):
 
   # dropout1
   dropout_1 = tf.nn.dropout(pool_5, keep_prob=0.25, name='dropout1')   
+
+########################################################################################################    
+  # merge two eyes
+  with tf.variable_scope('reshape1') as scope:
+    # reshape from convolution
+    reshape = tf.reshape(dropout_1, [-1, 4*4*512])
+    # concat left and right lable
+    concat = tf.concat([reshape, indication], axis=-1)
+    # reshape1(merge eyes)
+    reshape_1 = tf.reshape(concat, [32,-1], name=scope.name)
+
+  # Dense1
+  with tf.variable_scope('Dense1') as scope:
+    weights = _variable_with_weight_decay('weights', shape=[4*4*512*2+4, 1024],
+                                          init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)    
+    biases = _variable_on_cpu('biases', [1024], tf.constant_initializer(0.0), flags.use_fp16)
+    pre_activation = tf.matmul(reshape_1, weights) + biases
+    Dense_1 = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
+    _activation_summary(Dense_1)
+      
+  # Dense2
+  with tf.variable_scope('Dense2') as scope:
+    weights = _variable_with_weight_decay('weights', shape=[1024, 512],
+                                          init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)    
+    biases = _variable_on_cpu('biases', [512], tf.constant_initializer(0.0), flags.use_fp16)
+    pre_activation = tf.matmul(Dense_1, weights) + biases
+    Dense_2 = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
+    _activation_summary(Dense_2)
   
-#  # merge two eyes
+  # Dense3
+  with tf.variable_scope('Dense3') as scope:
+    weights = _variable_with_weight_decay('weights', shape=[512, 512],
+                                          init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)    
+    biases = _variable_on_cpu('biases', [512], tf.constant_initializer(0.0), flags.use_fp16)
+    pre_activation = tf.matmul(Dense_2, weights) + biases
+    Dense_3 = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
+    _activation_summary(Dense_3)  
+
+  # Dense4
+  with tf.variable_scope('Dense4') as scope:
+    weights = _variable_with_weight_decay('weights', shape=[512, 512],
+                                          init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)    
+    biases = _variable_on_cpu('biases', [512], tf.constant_initializer(0.0), flags.use_fp16)
+    pre_activation = tf.matmul(Dense_3, weights) + biases
+    Dense_4 = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
+    _activation_summary(Dense_4)  
+
+  # dropout2
+  dropout_2 = tf.nn.dropout(Dense_4, keep_prob=0.25, name='dropout2')      
+    
+  # linear layer(WX + b),
+  # We don't apply softmax here because
+  # tf.nn.sparse_softmax_cross_entropy_with_logits accepts the unscaled logits
+  # and performs the softmax internally for efficiency.
+  with tf.variable_scope('softmax_linear') as scope:
+    weights = _variable_with_weight_decay('weights', [512, 2*NUM_CLASSES],
+                                          init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)
+    biases = _variable_on_cpu('biases', [2*NUM_CLASSES], tf.constant_initializer(0.0), flags.use_fp16)
+    softmax_linear = tf.add(tf.matmul(dropout_2, weights), biases, name=scope.name)
+    _activation_summary(softmax_linear)
+    
+  # back to one eye
+  with tf.variable_scope('reshape2') as scope:
+    reshape_2 = tf.reshape(softmax_linear,[64,5],name=scope.name)
+
+  return reshape_2
+########################################################################################################  
+#  # Don't merge, compare with keras  
 #  with tf.variable_scope('reshape1') as scope:
 #    # reshape from convolution
-#    reshape = tf.reshape(dropout_1, [-1, 4*4*512])
-#    # concat left and right lable
-#    concat = tf.concat([reshape, indication], axis=-1)
-#    # reshape1(merge eyes)
-#    reshape_1 = tf.reshape(concat, [32,-1], name=scope.name)
-#
+#    reshape1 = tf.reshape(dropout_1, [-1, 4*4*512])
+#    
 #  # Dense1
 #  with tf.variable_scope('Dense1') as scope:
-#    weights = _variable_with_weight_decay('weights', shape=[4*4*512*2+4, 1024],
+#    weights = _variable_with_weight_decay('weights', shape=[4*4*512, 1024],
 #                                          init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)    
 #    biases = _variable_on_cpu('biases', [1024], tf.constant_initializer(0.0), flags.use_fp16)
-#    pre_activation = tf.matmul(reshape_1, weights) + biases
+#    pre_activation = tf.matmul(reshape1, weights) + biases
 #    Dense_1 = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
 #    _activation_summary(Dense_1)
 #      
 #  # Dense2
 #  with tf.variable_scope('Dense2') as scope:
-#    weights = _variable_with_weight_decay('weights', shape=[2048, 1024],
+#    weights = _variable_with_weight_decay('weights', shape=[1024, 1024],
 #                                          init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)    
 #    biases = _variable_on_cpu('biases', [1024], tf.constant_initializer(0.0), flags.use_fp16)
 #    pre_activation = tf.matmul(Dense_1, weights) + biases
@@ -433,66 +510,14 @@ def inference(images, indication, flags):
 #  # tf.nn.sparse_softmax_cross_entropy_with_logits accepts the unscaled logits
 #  # and performs the softmax internally for efficiency.
 #  with tf.variable_scope('softmax_linear') as scope:
-#    weights = _variable_with_weight_decay('weights', [512, 2*NUM_CLASSES],
+#    weights = _variable_with_weight_decay('weights', [512, NUM_CLASSES],
 #                                          init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)
-#    biases = _variable_on_cpu('biases', [2*NUM_CLASSES], tf.constant_initializer(0.0), flags.use_fp16)
+#    biases = _variable_on_cpu('biases', [NUM_CLASSES], tf.constant_initializer(0.0), flags.use_fp16)
 #    softmax_linear = tf.add(tf.matmul(dropout_2, weights), biases, name=scope.name)
 #    _activation_summary(softmax_linear)
-#    
-#  # back to one eye
-#  with tf.variable_scope('reshape2') as scope:
-#    reshape_2 = tf.reshape(softmax_linear,[64,5],name=scope.name)
 
-#  return reshape_2
-########################################################################################################  
-  # Don't merge, compare with keras  
-  with tf.variable_scope('reshape1') as scope:
-    # reshape from convolution
-    reshape1 = tf.reshape(dropout_1, [-1, 4*4*512])
-    
-  # Dense1
-  with tf.variable_scope('Dense1') as scope:
-    weights = _variable_with_weight_decay('weights', shape=[4*4*512, 1024],
-                                          init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)    
-    biases = _variable_on_cpu('biases', [1024], tf.constant_initializer(0.0), flags.use_fp16)
-    pre_activation = tf.matmul(reshape1, weights) + biases
-    Dense_1 = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(Dense_1)
-      
-  # Dense2
-  with tf.variable_scope('Dense2') as scope:
-    weights = _variable_with_weight_decay('weights', shape=[1024, 1024],
-                                          init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)    
-    biases = _variable_on_cpu('biases', [1024], tf.constant_initializer(0.0), flags.use_fp16)
-    pre_activation = tf.matmul(Dense_1, weights) + biases
-    Dense_2 = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(Dense_2)
-  
-  # Dense3
-  with tf.variable_scope('Dense3') as scope:
-    weights = _variable_with_weight_decay('weights', shape=[1024, 512],
-                                          init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)    
-    biases = _variable_on_cpu('biases', [512], tf.constant_initializer(0.0), flags.use_fp16)
-    pre_activation = tf.matmul(Dense_2, weights) + biases
-    Dense_3 = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(Dense_3)  
-
-  # dropout2
-  dropout_2 = tf.nn.dropout(Dense_3, keep_prob=0.25, name='dropout2')      
-    
-  # linear layer(WX + b),
-  # We don't apply softmax here because
-  # tf.nn.sparse_softmax_cross_entropy_with_logits accepts the unscaled logits
-  # and performs the softmax internally for efficiency.
-  with tf.variable_scope('softmax_linear') as scope:
-    weights = _variable_with_weight_decay('weights', [512, NUM_CLASSES],
-                                          init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)
-    biases = _variable_on_cpu('biases', [NUM_CLASSES], tf.constant_initializer(0.0), flags.use_fp16)
-    softmax_linear = tf.add(tf.matmul(dropout_2, weights), biases, name=scope.name)
-    _activation_summary(softmax_linear)
+#  return softmax_linear
 #########################################################################################################
-  return softmax_linear
-
 
   
 def loss(logits, labels, examples_num):
@@ -511,8 +536,8 @@ def loss(logits, labels, examples_num):
   # the sparse_softmax_cross_entropy_with_logits is support one-hot labels, this is important
   labels = tf.cast(labels, tf.int64)  
   cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-      labels=labels, logits=logits, name='left_cross_entropy_per_example')
-  cross_entropy_mean = tf.reduce_mean(cross_entropy, name='left_cross_entropy')
+      labels=labels, logits=logits, name='cross_entropy_per_example')
+  cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
 
   # kappa loss
 #  labels_one_hot = tf.one_hot(labels, 5)

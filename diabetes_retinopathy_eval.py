@@ -24,13 +24,13 @@ eval_parser = argparse.ArgumentParser(parents=[diabetes_retinopathy.model_parser
 eval_parser.add_argument('--eval_log_dir', type=str, default='D:\\AlanTan\\CNN\\diabetes_retinopathy_tensorflow\\diabetes_retinopathy_classifer_tensorflow_eval',
                     help='Directory where to write event logs.')
 
-eval_parser.add_argument('--checkpoint_dir', type=str, default='D:\\AlanTan\\CNN\\diabetes_retinopathy_tensorflow\\diabetes_retinopathy_classifer_tensorflow_train',
+eval_parser.add_argument('--checkpoint_dir', type=str, default='D:\\AlanTan\\CNN\\diabetes_retinopathy_tensorflow\\diabetes_retinopathy_classifer_tensorflow_train3',
                     help='Directory where to read model checkpoints.')
 
 eval_parser.add_argument('--eval_interval_secs', type=int, default=60*20,
                     help='How often to run the eval.')
 
-eval_parser.add_argument('--run_once', type=bool, default=False,
+eval_parser.add_argument('--run_once', type=bool, default=True,
                     help='Whether to run eval only once.')
 
 
