@@ -13,18 +13,20 @@ from datetime import datetime
 import math
 import argparse
 import time
+import os
 
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 
 import diabetes_retinopathy
 
 eval_parser = argparse.ArgumentParser(parents=[diabetes_retinopathy.model_parser], add_help=True, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-eval_parser.add_argument('--eval_log_dir', type=str, default='D:\\AlanTan\\CNN\\diabetes_retinopathy_tensorflow\\diabetes_retinopathy_classifer_tensorflow_eval',
+eval_parser.add_argument('--eval_log_dir', type=str, default='D:\\AlanTan\\CNN\\diabetes_retinopathy_tensorflow\\diabetes_retinopathy_classifer_tensorflow_eval2',
                     help='Directory where to write event logs.')
 
-eval_parser.add_argument('--checkpoint_dir', type=str, default='D:\\AlanTan\\CNN\\diabetes_retinopathy_tensorflow\\diabetes_retinopathy_classifer_tensorflow_train3',
+eval_parser.add_argument('--checkpoint_dir', type=str, default='D:\\AlanTan\\CNN\\diabetes_retinopathy_tensorflow\\diabetes_retinopathy_classifer_tensorflow_restore_train2',
                     help='Directory where to read model checkpoints.')
 
 eval_parser.add_argument('--eval_interval_secs', type=int, default=60*20,
@@ -59,6 +61,7 @@ def eval_once(saver, summary_writer, top_k_op, summary_op, debug_op):
     # Start the queue runners.
     coord = tf.train.Coordinator()
     try:
+      list_predicts = []
       threads = []
       for qr in tf.get_collection(tf.GraphKeys.QUEUE_RUNNERS):
         threads.extend(qr.create_threads(sess, coord=coord, daemon=True,
@@ -73,7 +76,11 @@ def eval_once(saver, summary_writer, top_k_op, summary_op, debug_op):
         if step % 10 == 0:
           print("The " + str(step) + " step...")          
         predictions, df_log = sess.run([top_k_op, debug_op]) # debug_op 
-        
+        patients = pd.DataFrame(df_log[0], columns=['patients'])
+        labels = pd.DataFrame(df_log[1],columns=['labels'])
+        logits = pd.DataFrame(df_log[2],columns=['L0','L1','L2','L3','L4'])
+        df_predict = pd.concat([patients,labels,logits],axis=1)
+        list_predicts.append(df_predict)
 #        print(df_log)
         true_count += np.sum(predictions)
         step += 1
@@ -91,7 +98,8 @@ def eval_once(saver, summary_writer, top_k_op, summary_op, debug_op):
 
     coord.request_stop()
     coord.join(threads, stop_grace_period_secs=10)    
-
+    df_predicts = pd.concat(list_predicts)
+    df_predicts.to_csv(os.path.join(FLAGS.eval_log_dir,"predicts.csv"))
 
 def evaluate():
   """Eval diabetes_retinopathy for a number of steps."""
