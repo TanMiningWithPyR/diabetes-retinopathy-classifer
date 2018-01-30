@@ -24,12 +24,13 @@ from __future__ import print_function
 import argparse
 import os
 import re
+import math
 
 import tensorflow as tf
 import numpy as np
 
 import diabetes_retinopathy_input
-import quadratic_kappa
+# import quadratic_kappa
 
 model_parser = argparse.ArgumentParser(parents=[diabetes_retinopathy_input.input_parser], add_help=False, 
                                        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -45,7 +46,7 @@ NUM_CLASSES = diabetes_retinopathy_input.NUM_CLASSES
 MOVING_AVERAGE_DECAY = 0.9999               # The decay to use for the moving average.
 NUM_EPOCHS_PER_DECAY = 50.0                 # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = np.sqrt(0.1)   # Learning rate decay factor.
-INITIAL_LEARNING_RATE = 0.003              # Initial learning rate.
+INITIAL_LEARNING_RATE = 0.0003              # Initial learning rate.
 
 # If a model is trained with multiple GPUs, prefix all Op names with tower_name
 # to differentiate the operations. Note that this prefix is removed from the
@@ -185,7 +186,7 @@ def inputs(flags):
   if not flags.labels_file:
     raise ValueError('Please supply a labels_file') 
   left_images,left_labels,right_images,right_labels,patients,left_indication,right_indication = \
-  diabetes_retinopathy_input.inputs(data_dir=eval_dir, labels_file=flags.labels_file, batch_size=flags.batch_size)
+  diabetes_retinopathy_input.inputs(data_dir=eval_dir, labels_file=flags.labels_file, batch_size=flags.batch_size, repeat=flags.num_epochs)
 
   if flags.use_fp16:
     left_images = tf.cast(left_images, tf.float16)
@@ -212,7 +213,7 @@ def inference(images, indication, flags):
   # by replacing all instances of tf.get_variable() with tf.Variable().  
   
   # conv1
-  with tf.variable_scope('conv1') as scope:
+  with tf.variable_scope('conv1', reuse=tf.AUTO_REUSE) as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[5, 5, 3, 32],
                                          init_parameter=1.0,
@@ -225,7 +226,7 @@ def inference(images, indication, flags):
     _activation_summary(conv_1)
 
   # conv2
-  with tf.variable_scope('conv2') as scope:
+  with tf.variable_scope('conv2', reuse=tf.AUTO_REUSE) as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 32, 32],
                                          init_parameter=1.0,
@@ -242,7 +243,7 @@ def inference(images, indication, flags):
                          padding='SAME', name='pool1')
     
   # conv3
-  with tf.variable_scope('conv3') as scope:
+  with tf.variable_scope('conv3', reuse=tf.AUTO_REUSE) as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[5, 5, 32, 64],
                                          init_parameter=1.0,
@@ -255,7 +256,7 @@ def inference(images, indication, flags):
     _activation_summary(conv_3)
     
   # conv4
-  with tf.variable_scope('conv4') as scope:
+  with tf.variable_scope('conv4', reuse=tf.AUTO_REUSE) as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 64, 64],
                                          init_parameter=1.0,
@@ -269,7 +270,7 @@ def inference(images, indication, flags):
 
     
   # conv5
-  with tf.variable_scope('conv5') as scope:
+  with tf.variable_scope('conv5', reuse=tf.AUTO_REUSE) as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 64, 64],
                                          init_parameter=1.0,
@@ -286,7 +287,7 @@ def inference(images, indication, flags):
                          padding='SAME', name='pool2')
 
   # conv6
-  with tf.variable_scope('conv6') as scope:
+  with tf.variable_scope('conv6', reuse=tf.AUTO_REUSE) as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 64, 128],
                                          init_parameter=1.0,
@@ -299,7 +300,7 @@ def inference(images, indication, flags):
     _activation_summary(conv_6)        
 
   # conv7
-  with tf.variable_scope('conv7') as scope:
+  with tf.variable_scope('conv7', reuse=tf.AUTO_REUSE) as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 128, 128],
                                          init_parameter=1.0,
@@ -312,7 +313,7 @@ def inference(images, indication, flags):
     _activation_summary(conv_7)
 
   # conv8
-  with tf.variable_scope('conv8') as scope:
+  with tf.variable_scope('conv8', reuse=tf.AUTO_REUSE) as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 128, 128],
                                          init_parameter=1.0,
@@ -329,7 +330,7 @@ def inference(images, indication, flags):
                          padding='SAME', name='pool3')  
   
   # conv9
-  with tf.variable_scope('conv9') as scope:
+  with tf.variable_scope('conv9', reuse=tf.AUTO_REUSE) as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 128, 256],
                                          init_parameter=1.0,
@@ -342,7 +343,7 @@ def inference(images, indication, flags):
     _activation_summary(conv_9)        
     
   # conv10
-  with tf.variable_scope('conv10') as scope:
+  with tf.variable_scope('conv10', reuse=tf.AUTO_REUSE) as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 256, 256],
                                          init_parameter=1.0,
@@ -355,7 +356,7 @@ def inference(images, indication, flags):
     _activation_summary(conv_10)      
   
   # conv11
-  with tf.variable_scope('conv11') as scope:
+  with tf.variable_scope('conv11', reuse=tf.AUTO_REUSE) as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 256, 256],
                                          init_parameter=1.0,
@@ -372,7 +373,7 @@ def inference(images, indication, flags):
                          padding='SAME', name='pool4')   
   
   # conv12
-  with tf.variable_scope('conv12') as scope:
+  with tf.variable_scope('conv12', reuse=tf.AUTO_REUSE) as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 256, 512],
                                          init_parameter=1.0,
@@ -385,7 +386,7 @@ def inference(images, indication, flags):
     _activation_summary(conv_12)   
     
   # conv13
-  with tf.variable_scope('conv13') as scope:
+  with tf.variable_scope('conv13', reuse=tf.AUTO_REUSE) as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[3, 3, 512, 512],
                                          init_parameter=1.0,
@@ -415,7 +416,7 @@ def inference(images, indication, flags):
     reshape_1 = tf.reshape(concat, [32,-1], name=scope.name)
 
   # Dense1
-  with tf.variable_scope('Dense1') as scope:
+  with tf.variable_scope('Dense1', reuse=tf.AUTO_REUSE) as scope:
     weights = _variable_with_weight_decay('weights', shape=[4*4*512*2+4, 1024],
                                           init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)    
     biases = _variable_on_cpu('biases', [1024], tf.constant_initializer(0.0), flags.use_fp16)
@@ -424,7 +425,7 @@ def inference(images, indication, flags):
     _activation_summary(Dense_1)
       
   # Dense2
-  with tf.variable_scope('Dense2') as scope:
+  with tf.variable_scope('Dense2', reuse=tf.AUTO_REUSE) as scope:
     weights = _variable_with_weight_decay('weights', shape=[1024, 512],
                                           init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)    
     biases = _variable_on_cpu('biases', [512], tf.constant_initializer(0.0), flags.use_fp16)
@@ -433,7 +434,7 @@ def inference(images, indication, flags):
     _activation_summary(Dense_2)
   
   # Dense3
-  with tf.variable_scope('Dense3') as scope:
+  with tf.variable_scope('Dense3', reuse=tf.AUTO_REUSE) as scope:
     weights = _variable_with_weight_decay('weights', shape=[512, 512],
                                           init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)    
     biases = _variable_on_cpu('biases', [512], tf.constant_initializer(0.0), flags.use_fp16)
@@ -441,23 +442,23 @@ def inference(images, indication, flags):
     Dense_3 = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
     _activation_summary(Dense_3)  
 
-  # Dense4
-  with tf.variable_scope('Dense4') as scope:
-    weights = _variable_with_weight_decay('weights', shape=[512, 512],
-                                          init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)    
-    biases = _variable_on_cpu('biases', [512], tf.constant_initializer(0.0), flags.use_fp16)
-    pre_activation = tf.matmul(Dense_3, weights) + biases
-    Dense_4 = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
-    _activation_summary(Dense_4)  
+#  # Dense4
+#  with tf.variable_scope('Dense4', reuse=tf.AUTO_REUSE) as scope:
+#    weights = _variable_with_weight_decay('weights', shape=[512, 512],
+#                                          init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)    
+#    biases = _variable_on_cpu('biases', [512], tf.constant_initializer(0.0), flags.use_fp16)
+#    pre_activation = tf.matmul(Dense_3, weights) + biases
+#    Dense_4 = tf.nn.leaky_relu(pre_activation, alpha=0.5 ,name=scope.name)
+#    _activation_summary(Dense_4)  
 
   # dropout2
-  dropout_2 = tf.nn.dropout(Dense_4, keep_prob=0.25, name='dropout2')      
+  dropout_2 = tf.nn.dropout(Dense_3, keep_prob=0.25, name='dropout2')      
     
   # linear layer(WX + b),
   # We don't apply softmax here because
   # tf.nn.sparse_softmax_cross_entropy_with_logits accepts the unscaled logits
   # and performs the softmax internally for efficiency.
-  with tf.variable_scope('softmax_linear') as scope:
+  with tf.variable_scope('softmax_linear', reuse=tf.AUTO_REUSE) as scope:
     weights = _variable_with_weight_decay('weights', [512, 2*NUM_CLASSES],
                                           init_parameter=1.0, wd=5e-4, use_fp16=flags.use_fp16)
     biases = _variable_on_cpu('biases', [2*NUM_CLASSES], tf.constant_initializer(0.0), flags.use_fp16)
@@ -636,12 +637,22 @@ def train(total_loss, global_step, flags):
 
   return train_op
 
-def eval_train_data(logits,labels):
-  top_k_op = tf.nn.in_top_k(logits, labels, 1)
-  accuracy_op = tf.reduce_mean(tf.cast(top_k_op, tf.float32))
-  _activation_summary(accuracy_op)
-  tf.add_to_collection('accuracy', accuracy_op)
-  return tf.reduce_mean(tf.get_collection('accuracy'), name='total_accuracy') 
+def eval_train_data(sess, logits, labels, flags):
+  top_k_op = tf.nn.in_top_k(logits, labels, 1) 
+
+  num_iter = int(math.ceil(flags.num_examples_for_eval / flags.batch_size))
+
+  true_count = 0  # Counts the number of correct predictions.
+  total_sample_count = num_iter * flags.batch_size
+  step = 0
+  while step < num_iter:        
+    predictions = sess.run([top_k_op])     
+    true_count += np.sum(predictions)
+    step += 1
+
+   # Compute precision @ 1.
+  precision = true_count / (total_sample_count * 2)
+  return precision
 
 if __name__ == '__main__':
   FLAGS = model_parser.parse_args()

@@ -65,7 +65,7 @@ def quadratic_kappa_on_one_hot_value(predict, real, examples_num, eps=1e-15):
   # The denominator.
   denom = tf.reduce_sum(weights * expected_probs / num_scored_items)
 	
-  return tf.cast(1 - nom / denom, tf.float32)
+  return tf.cast(- (1 - nom / denom), tf.float32)
       
 if __name__ == '__main__':
   y = np.array([[0.4,0.3,0.2,0.1,0.0],[0.0,0.1,0.2,0.3,0.4]])

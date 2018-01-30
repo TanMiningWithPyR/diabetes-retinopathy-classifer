@@ -21,7 +21,6 @@ import time
 import math
 import argparse
 import tensorflow as tf
-import numpy as np
 
 import diabetes_retinopathy
 
@@ -63,22 +62,17 @@ def train(last_step):
 
     # Build a Graph that trains the model with one batch of examples and
     # updates the model parameters.
-    train_op = diabetes_retinopathy.train(loss, global_step, FLAGS)
+    train_op = diabetes_retinopathy.train(loss, global_step, FLAGS)    
     
-    # Calculate accuracy.
-    accuracy_op = diabetes_retinopathy.eval_train_data(logits, labels)
+    with tf.device('/cpu:0'):
+      e_left_images, e_left_labels, e_right_images, e_right_labels, e_patients, e_left_indication, e_right_indication = \
+      diabetes_retinopathy.inputs(FLAGS)   
+     
+    e_labels = tf.concat([e_left_labels, e_right_labels], 0)
+    e_images = tf.concat([e_left_images, e_right_images], 0)   
+    e_indication = tf.concat([e_left_indication, e_right_indication], 0)
+    e_logits = diabetes_retinopathy.inference(e_images, e_indication, FLAGS)
     
-#    with tf.device('/cpu:0'):
-#      e_left_images, e_left_labels, e_right_images, e_right_labels, e_patients, e_examples_num, e_left_indication, e_right_indication = \
-#      diabetes_retinopathy.inputs(FLAGS)   
-#     
-#    e_labels = tf.concat([e_left_labels, e_right_labels], 0)
-#    e_images = tf.concat([e_left_images, e_right_images], 0)   
-#    e_indication = tf.concat([e_left_indication, e_right_indication], 0)
-#    e_logits = diabetes_retinopathy.inference(e_images, e_indication, FLAGS)
-#    
-#    accuracy_op_eval = diabetes_retinopathy.eval_train_data(e_logits, e_labels)
-
     class _LoggerHook(tf.train.SessionRunHook):
       """Logs loss and runtime."""
       def __init__(self):
@@ -98,7 +92,7 @@ def train(last_step):
           self._epoch = self._step // self._log_frequency
           format_str = ('%s: epoch %d start (%d totally)')
           print (format_str % (datetime.now(), self._epoch, FLAGS.num_epochs))          
-        return tf.train.SessionRunArgs([loss,accuracy_op])  # Asks for loss and accuracy value.
+        return tf.train.SessionRunArgs([loss])  # Asks for loss.
 
       def after_run(self, run_context, run_values):          
         if self._step % self._log_frequency == self._log_frequency - 1 :
@@ -106,11 +100,10 @@ def train(last_step):
           duration = current_time - self._start_time
 
           loss_value = run_values.results[0]
-          accuracy_value = run_values.results[1]
           steps_per_sec = self._log_frequency / duration
           sec_per_sec = float(duration / self._log_frequency)
-          format_str = ('%s: step %d, epoch %d end, loss = %.3f, accuracy_value = %.3f (%.3f steps/sec; %.3f sec/step)')
-          print (format_str % (datetime.now(), self._step, self._epoch, loss_value, accuracy_value,
+          format_str = ('%s: step %d, epoch %d end, loss = %.3f (%.3f steps/sec; %.3f sec/step)')
+          print (format_str % (datetime.now(), self._step, self._epoch, loss_value,
                                steps_per_sec, sec_per_sec))           
 
     class _saverHook(tf.train.SessionRunHook):
@@ -123,25 +116,31 @@ def train(last_step):
         
       def begin(self):
         self._step = -1
-        self._accurancy_arr = np.array([0.1,0.25,0.76,0.78,0.8,0.82,0.84,0.86,0.88])
+        self._saved_accurancy = 0.0
         self._accurancy_index = 0
     
       def before_run(self, run_context):
         self._step += 1
-        self._saved_accurancy = self._accurancy_arr[self._accurancy_index]
-        return tf.train.SessionRunArgs([loss, accuracy_op])
+        return tf.train.SessionRunArgs([loss])
   
       def after_run(self, run_context, run_values):
-        if run_values.results[1] >= self._saved_accurancy:
-          if self._step % self._save_steps == self._save_steps - 1 or self._step == 0:          
-            self._accurancy_index = self._accurancy_index + 1
+        if self._step % self._save_steps == self._save_steps - 1 or self._step == 0:   
+#          self._accuracy_on_eval = run_context.session.run(accuracy_op_eval)
+          self._accuracy_on_eval = diabetes_retinopathy.eval_train_data(run_context.session, e_logits, e_labels, FLAGS)
+          if self._accuracy_on_eval >= self._saved_accurancy:              
+            self._saved_accurancy = self._accuracy_on_eval
             self._saver.save(run_context.session, self._save_path, self._step) 
-            format_str = ('%s: step %d, loss = %.3f, accuracy_value = %.3f, weights was saved')
-            print (format_str % (datetime.now(), self._step, run_values.results[0], run_values.results[1])) 
+            train_format_str = ('%s: step %d, loss = %.3f')
+            eval_format_str = ('%s: step %d, eval_accuracy_value = %.3f, weights was saved')
+            print (train_format_str % (datetime.now(), self._step, run_values.results[0])) 
+            print (eval_format_str % (datetime.now(), self._step, self._saved_accurancy))   
+          else:
+            eval_format_str = ('%s: step %d, eval_accuracy_value = %.3f, weights was not saved')
+            print (eval_format_str % (datetime.now(), self._step, self._accuracy_on_eval))  
                 
         if self._step % 20 == 0:
-          format_str = ('%s: step %d, loss = %.5f, accuracy_value = %.3f')
-          print (format_str % (datetime.now(), self._step, run_values.results[0], run_values.results[1]))             
+          format_str = ('%s: step %d, loss = %.5f')
+          print (format_str % (datetime.now(), self._step, run_values.results[0]))                  
           
     mysaver=tf.train.Saver(max_to_keep=6)
     
@@ -155,7 +154,7 @@ def train(last_step):
         config=tf.ConfigProto(
             log_device_placement=FLAGS.log_device_placement)) as mon_sess:
       while not mon_sess.should_stop():
-        mon_sess.run([train_op,accuracy_op])
+        mon_sess.run([train_op])
 
 
 def main(argv=None):  # pylint: disable=unused-argument

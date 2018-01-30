@@ -43,22 +43,6 @@ input_parser.add_argument('--eval_data', type=str, default='test',
 
 NUM_CLASSES = 5
 
-# 最小公倍数
-def lcm(a, b):
-    if b > a:
-        a, b = b, a     # a为最大值
-    if a % b == 0:
-        return a        # 判断a是否为最小公倍数
-    mul = 2             # 最小公倍数为最大值的倍数
-    while a*mul % b != 0:
-        mul += 1
-    return a*mul
-    
-def lcm_arr(arr):
-  great = np.max(arr)
-  lcm_arr = [lcm(great, x) for x in arr]
-  return np.max(lcm_arr)
-
 def read_label(labels_file):
   df_labels = pd.read_csv(labels_file)
   patient = df_labels.image.str.split('_', expand=True)
@@ -178,7 +162,7 @@ def distorted_inputs(data_dir, labels_file,  batch_size, balance_sample, repeat=
          tf_next_patient, examples_num, \
          tf_next_left_indication,tf_next_right_indication
 
-def inputs(data_dir, labels_file, batch_size):
+def inputs(data_dir, labels_file, batch_size, repeat=None):
   """Construct input for diabetes retinopathy evaluation using the Reader ops.
   Args:    
     data_dir: Path to the diabetes retinopathy data directory.
@@ -207,6 +191,7 @@ def inputs(data_dir, labels_file, batch_size):
   tf_dataset = tf.data.Dataset.from_tensor_slices((tf_patient_paths, tf_labels, tf_patients, tf_left_indications, tf_right_indications))
   tf_dataset = tf_dataset.map(_parse_function_normal)
   tf_dataset = tf_dataset.batch(batch_size)
+  tf_dataset = tf_dataset.repeat(repeat)
   tf_iterator = tf_dataset.make_one_shot_iterator()
   tf_next_left_image,tf_next_left_label, \
   tf_next_right_image,tf_next_right_label, \
